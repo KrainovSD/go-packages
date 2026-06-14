@@ -32,8 +32,8 @@ type Oauth struct {
 	serviceDataExpires int
 	frontendHost       string
 	frontendProtocol   string
-	updateToken        func(token string) (SessionToken, error)
-	logout             func(token string) error
+	updateToken        func(ctx context.Context, token string) (SessionToken, error)
+	logout             func(ctx context.Context, token string) error
 }
 
 type OauthOptions struct {
@@ -51,8 +51,8 @@ type OauthOptions struct {
 	ServiceDataExpires int
 	FrontendHost       string
 	FrontendProtocol   string
-	UpdateToken        func(token string) (SessionToken, error)
-	Logout             func(token string) error
+	UpdateToken        func(ctx context.Context, token string) (SessionToken, error)
+	Logout             func(ctx context.Context, token string) error
 }
 
 func Create(options *OauthOptions) (*Oauth, error) {
@@ -213,9 +213,9 @@ type OauthProvider struct {
 	callbackPath     string
 	clearPath        string
 	provider         string
-	parseUser        func(response []byte) (User, error)
-	parseToken       func(response []byte) (TokenInfo, error)
-	createSession    func(token TokenInfo, user User) (SessionToken, error)
+	parseUser        func(ctx context.Context, response []byte) (User, error)
+	parseToken       func(ctx context.Context, response []byte) (TokenInfo, error)
+	createSession    func(ctx context.Context, token TokenInfo, user User) (SessionToken, error)
 	scopes           []string
 	iatLeewaySeconds int
 }
@@ -236,9 +236,9 @@ type OauthProviderOptions struct {
 	CallbackPath     string
 	ClearPath        string
 	Provider         string
-	ParseUser        func(response []byte) (User, error)
-	ParseToken       func(response []byte) (TokenInfo, error)
-	CreateSession    func(token TokenInfo, user User) (SessionToken, error)
+	ParseUser        func(ctx context.Context, response []byte) (User, error)
+	ParseToken       func(ctx context.Context, response []byte) (TokenInfo, error)
+	CreateSession    func(ctx context.Context, token TokenInfo, user User) (SessionToken, error)
 	Scopes           []string
 	IatLeewaySeconds int
 }
@@ -349,7 +349,7 @@ func (o *OauthProviderOptions) validate() error {
 	return nil
 }
 
-func (o *OauthProvider) getTokenByRefresh(apiClient *api.Client, refreshToken string) (TokenInfo, error) {
+func (o *OauthProvider) getTokenByRefresh(ctx context.Context, apiClient *api.Client, refreshToken string) (TokenInfo, error) {
 	var err error
 	var tokenInfo TokenInfo
 
@@ -370,7 +370,7 @@ func (o *OauthProvider) getTokenByRefresh(apiClient *api.Client, refreshToken st
 	}
 
 	if o.parseToken != nil {
-		if tokenInfo, err = o.parseToken(response.Data); err != nil {
+		if tokenInfo, err = o.parseToken(ctx, response.Data); err != nil {
 			return tokenInfo, fmt.Errorf("parse token: %w", err)
 		}
 	} else {
@@ -391,7 +391,7 @@ type getTokenOptions struct {
 	ApiClient    *api.Client
 }
 
-func (o *OauthProvider) getToken(options getTokenOptions) (TokenInfo, error) {
+func (o *OauthProvider) getToken(ctx context.Context, options getTokenOptions) (TokenInfo, error) {
 	var err error
 	var tokenInfo TokenInfo
 
@@ -416,7 +416,7 @@ func (o *OauthProvider) getToken(options getTokenOptions) (TokenInfo, error) {
 	}
 
 	if o.parseToken != nil {
-		if tokenInfo, err = o.parseToken(response.Data); err != nil {
+		if tokenInfo, err = o.parseToken(ctx, response.Data); err != nil {
 			return tokenInfo, fmt.Errorf("parse token: %w", err)
 		}
 	} else {
@@ -430,7 +430,7 @@ func (o *OauthProvider) getToken(options getTokenOptions) (TokenInfo, error) {
 	return tokenInfo, nil
 }
 
-func (o *OauthProvider) getUser(token string, client *api.Client) (User, error) {
+func (o *OauthProvider) getUser(ctx context.Context, token string, client *api.Client) (User, error) {
 	var response api.Response
 	var err error
 	var user User
@@ -449,7 +449,7 @@ func (o *OauthProvider) getUser(token string, client *api.Client) (User, error) 
 		return user, fmt.Errorf("request user: %w", err)
 	}
 
-	if user, err = o.parseUser(response.Data); err != nil {
+	if user, err = o.parseUser(ctx, response.Data); err != nil {
 		return user, fmt.Errorf("parse user: %w", err)
 	}
 

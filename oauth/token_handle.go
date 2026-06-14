@@ -26,13 +26,13 @@ func (p *OauthProvider) TokenHandle() func(w http.ResponseWriter, r *http.Reques
 
 		var sessionToken SessionToken
 		if p.oauth.updateToken != nil {
-			if sessionToken, err = p.oauth.updateToken(token); err != nil {
+			if sessionToken, err = p.oauth.updateToken(r.Context(), token); err != nil {
 				p.oauth.sendError(w, r, fmt.Errorf("update token: %w", err), 401)
 				return
 			}
 		} else if p.oauth.cookieRefreshToken != nil {
 			var tokenInfo TokenInfo
-			if tokenInfo, err = p.getTokenByRefresh(p.oauth.apiClient, token); err != nil {
+			if tokenInfo, err = p.getTokenByRefresh(r.Context(), p.oauth.apiClient, token); err != nil {
 				p.oauth.sendError(w, r, fmt.Errorf("request token: %w", err), 401)
 				return
 			}
@@ -44,13 +44,13 @@ func (p *OauthProvider) TokenHandle() func(w http.ResponseWriter, r *http.Reques
 			/** get user */
 			var user User
 			if p.parseUser != nil {
-				if user, err = p.getUser(tokenInfo.AccessToken, p.oauth.apiClient); err != nil {
+				if user, err = p.getUser(r.Context(), tokenInfo.AccessToken, p.oauth.apiClient); err != nil {
 					p.oauth.sendError(w, r, fmt.Errorf("get user: %w", err), 401)
 					return
 				}
 			}
 			if p.createSession != nil {
-				if sessionToken, err = p.createSession(tokenInfo, user); err != nil {
+				if sessionToken, err = p.createSession(r.Context(), tokenInfo, user); err != nil {
 					p.oauth.sendError(w, r, fmt.Errorf("create session: %w", err), 401)
 					return
 				}
@@ -99,7 +99,7 @@ func (o *Oauth) TokenHandle() func(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var sessionToken SessionToken
-		if sessionToken, err = o.updateToken(token); err != nil {
+		if sessionToken, err = o.updateToken(r.Context(), token); err != nil {
 			o.sendError(w, r, fmt.Errorf("update token: %w", err), 401)
 			return
 		}

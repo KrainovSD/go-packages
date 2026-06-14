@@ -75,7 +75,7 @@ func (p *OauthProvider) CallbackHandle() func(w http.ResponseWriter, r *http.Req
 		}
 		/** get access token */
 		var tokenInfo TokenInfo
-		if tokenInfo, err = p.getToken(getTokenOptions{
+		if tokenInfo, err = p.getToken(r.Context(), getTokenOptions{
 			CodeVerifier: fstate.CodeVerifier,
 			Code:         code,
 			CallbackUrl:  fstate.CallbackUrl,
@@ -104,7 +104,7 @@ func (p *OauthProvider) CallbackHandle() func(w http.ResponseWriter, r *http.Req
 		/** get user */
 		var user User
 		if p.parseUser != nil {
-			if user, err = p.getUser(tokenInfo.AccessToken, p.oauth.apiClient); err != nil {
+			if user, err = p.getUser(r.Context(), tokenInfo.AccessToken, p.oauth.apiClient); err != nil {
 				p.oauth.redirectError(redirectErrorOptions{
 					w:             w,
 					r:             r,
@@ -119,7 +119,7 @@ func (p *OauthProvider) CallbackHandle() func(w http.ResponseWriter, r *http.Req
 		/** create session */
 		var sessionToken SessionToken
 		if p.createSession != nil {
-			if sessionToken, err = p.createSession(tokenInfo, user); err != nil {
+			if sessionToken, err = p.createSession(r.Context(), tokenInfo, user); err != nil {
 				p.oauth.redirectError(redirectErrorOptions{
 					w:             w,
 					r:             r,

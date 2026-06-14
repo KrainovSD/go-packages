@@ -53,7 +53,7 @@ func (p *OauthProvider) TokenProxyHandle() func(w http.ResponseWriter, r *http.R
 
 		/** get access token */
 		var tokenInfo TokenInfo
-		if tokenInfo, err = p.getToken(getTokenOptions{
+		if tokenInfo, err = p.getToken(r.Context(), getTokenOptions{
 			CodeVerifier: fstate.CodeVerifier,
 			Code:         body.Code,
 			CallbackUrl:  fstate.CallbackUrl,
@@ -71,14 +71,14 @@ func (p *OauthProvider) TokenProxyHandle() func(w http.ResponseWriter, r *http.R
 
 		/** get user */
 		var user User
-		if user, err = p.getUser(tokenInfo.AccessToken, p.oauth.apiClient); err != nil {
+		if user, err = p.getUser(r.Context(), tokenInfo.AccessToken, p.oauth.apiClient); err != nil {
 			p.oauth.sendError(w, r, fmt.Errorf("get user: %w", err), 0)
 			return
 		}
 
 		/** create session */
 		var sessionToken SessionToken
-		if sessionToken, err = p.createSession(tokenInfo, user); err != nil {
+		if sessionToken, err = p.createSession(r.Context(), tokenInfo, user); err != nil {
 			p.oauth.sendError(w, r, fmt.Errorf("create session: %w", err), 0)
 			return
 		}

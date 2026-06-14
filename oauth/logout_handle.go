@@ -127,7 +127,7 @@ func (o *Oauth) LogoutHandle() func(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if o.logout != nil {
-			if err = o.logout(token); err != nil {
+			if err = o.logout(r.Context(), token); err != nil {
 				o.redirectError(redirectErrorOptions{
 					w:             w,
 					r:             r,
