@@ -47,6 +47,7 @@ type Request struct {
 	Timeout     time.Duration
 	MaxSize     int64
 	Debug       bool
+	NoRedirect  bool // affect a new api client to be created on each request
 }
 type Response struct {
 	Data   []byte
@@ -128,8 +129,19 @@ func (c *Client) Send(request Request) (Response, error) {
 	if request.ContentType != "" {
 		req.Header.Add("Content-Type", string(request.ContentType))
 	}
+	var httpClient = c.client
+	if request.NoRedirect {
+		httpClient = &http.Client{
+			Timeout:   c.client.Timeout,
+			Transport: c.client.Transport,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		}
+		defer httpClient.CloseIdleConnections()
+	}
 	var res *http.Response
-	if res, err = c.client.Do(req); err != nil {
+	if res, err = httpClient.Do(req); err != nil {
 		return Response{}, fmt.Errorf("do request url %s: %w", request.Url, err)
 	}
 	if request.Debug {
