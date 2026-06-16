@@ -37,7 +37,7 @@ type Oauth struct {
 }
 
 type OauthOptions struct {
-	Redis              *redis.Client
+	Redis              redis.UniversalClient
 	ApiClient          *api.Client
 	Log                *slog.Logger
 	CookieTimeKey      *Cookie
