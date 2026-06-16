@@ -18,7 +18,7 @@ import (
 
 type Oauth struct {
 	m                  *http.ServeMux
-	redis              *redis.Client
+	redis              redis.UniversalClient
 	log                *slog.Logger
 	apiClient          *api.Client
 	cookieTimeKey      *Cookie

@@ -165,7 +165,7 @@ func generateOauthServiceState() (oauthState, error) {
 	return servicesState, nil
 }
 
-func setLogoutState(ctx context.Context, logoutState logoutState, key string, serviceDataExpires int, redisClient *redis.Client) error {
+func setLogoutState(ctx context.Context, logoutState logoutState, key string, serviceDataExpires int, redisClient redis.UniversalClient) error {
 	var logoutStateBytes []byte
 	var err error
 	if logoutStateBytes, err = json.Marshal(logoutState); err != nil {
@@ -182,7 +182,7 @@ func setLogoutState(ctx context.Context, logoutState logoutState, key string, se
 	return nil
 }
 
-func getLogoutState(ctx context.Context, key string, redisClient *redis.Client) (logoutState, error) {
+func getLogoutState(ctx context.Context, key string, redisClient redis.UniversalClient) (logoutState, error) {
 	var state logoutState
 	if key == "" {
 		return state, fmt.Errorf("empty key")
@@ -207,7 +207,7 @@ func getLogoutState(ctx context.Context, key string, redisClient *redis.Client) 
 	return state, nil
 }
 
-func setFlowState(ctx context.Context, flowState flowState, key string, serviceDataExpires int, redisClient *redis.Client) error {
+func setFlowState(ctx context.Context, flowState flowState, key string, serviceDataExpires int, redisClient redis.UniversalClient) error {
 	var flowStateBytes []byte
 	var err error
 
@@ -227,7 +227,7 @@ func setFlowState(ctx context.Context, flowState flowState, key string, serviceD
 	return nil
 }
 
-func getFlowState(ctx context.Context, key string, redisClient *redis.Client) (flowState, error) {
+func getFlowState(ctx context.Context, key string, redisClient redis.UniversalClient) (flowState, error) {
 	var fstate flowState
 	if key == "" {
 		return fstate, fmt.Errorf("empty key")

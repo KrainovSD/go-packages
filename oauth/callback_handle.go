@@ -141,16 +141,21 @@ func (p *OauthProvider) CallbackHandle() func(w http.ResponseWriter, r *http.Req
 			}
 		}
 
-		if p.oauth.cookieRefreshToken != nil && tokenInfo.RefreshToken != "" && tokenInfo.RefreshTokenExpiresIn != 0 {
-			http.SetCookie(w, &http.Cookie{
-				Name:     p.oauth.cookieRefreshToken.Name,
-				Value:    tokenInfo.RefreshToken,
-				Path:     p.oauth.cookieRefreshToken.Prefix,
-				MaxAge:   tokenInfo.RefreshTokenExpiresIn,
-				HttpOnly: true,
-				Secure:   proto == "https",
-			})
+		if p.oauth.cookieRefreshToken != nil {
+			if tokenInfo.RefreshToken != "" && tokenInfo.RefreshTokenExpiresIn != 0 {
+				http.SetCookie(w, &http.Cookie{
+					Name:     p.oauth.cookieRefreshToken.Name,
+					Value:    tokenInfo.RefreshToken,
+					Path:     p.oauth.cookieRefreshToken.Prefix,
+					MaxAge:   tokenInfo.RefreshTokenExpiresIn,
+					HttpOnly: true,
+					Secure:   proto == "https",
+				})
+			} else {
+				p.oauth.log.Warn("not found refresh token or expires in", "refreshToken", tokenInfo.RefreshToken == "", "expiresIn", tokenInfo.RefreshTokenExpiresIn == 0)
+			}
 		}
+
 		if p.oauth.cookieSessionToken != nil {
 			http.SetCookie(w, &http.Cookie{
 				Name:     p.oauth.cookieSessionToken.Name,
