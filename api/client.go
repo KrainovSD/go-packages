@@ -13,60 +13,25 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
-type RequestMethod int
+type RequestMethod string
 
 const (
-	METHOD_GET RequestMethod = iota
-	METHOD_POST
-	METHOD_DELETE
-	METHOD_PUT
-	METHOD_PATCH
-	METHOD_OPTIONS
+	METHOD_GET     RequestMethod = "GET"
+	METHOD_POST                  = "POST"
+	METHOD_DELETE                = "DELETE"
+	METHOD_PUT                   = "PUT"
+	METHOD_PATCH                 = "PATCH"
+	METHOD_OPTIONS               = "OPTIONS"
 )
 
-func (m RequestMethod) String() string {
-	switch m {
-	case METHOD_GET:
-		return "GET"
-	case METHOD_POST:
-		return "POST"
-	case METHOD_DELETE:
-		return "DELETE"
-	case METHOD_PUT:
-		return "PUT"
-	case METHOD_PATCH:
-		return "PATCH"
-	case METHOD_OPTIONS:
-		return "OPTIONS"
-	default:
-		return "UNKNOWN"
-	}
-}
-
-type RequestContentType int
+type RequestContentType string
 
 const (
-	CONTENT_TYPE_JSON RequestContentType = iota
-	CONTENT_TYPE_TEXT
-	CONTENT_TYPE_FORM
-	CONTENT_TYPE_STREAM
+	CONTENT_TYPE_JSON   RequestContentType = "application/json"
+	CONTENT_TYPE_TEXT                      = "text/plain"
+	CONTENT_TYPE_FORM                      = "application/x-www-form-urlencoded"
+	CONTENT_TYPE_STREAM                    = "application/octet-stream"
 )
-
-func (m RequestContentType) String() string {
-	switch m {
-	case CONTENT_TYPE_JSON:
-		return "application/json"
-	case CONTENT_TYPE_TEXT:
-		return "text/plain"
-	case CONTENT_TYPE_FORM:
-		return "application/x-www-form-urlencoded"
-	case CONTENT_TYPE_STREAM:
-		return "application/octet-stream"
-
-	default:
-		return "UNKNOWN"
-	}
-}
 
 type Client struct {
 	client *http.Client
@@ -122,13 +87,12 @@ func CreateClient(opts ClientOptions) (*Client, error) {
 	}, nil
 }
 
+func (c *Client) Close() {
+	c.client.CloseIdleConnections()
+}
+
 func (c *Client) Send(request Request) (Response, error) {
-	var result Response
-	var content []byte
 	var err error
-	var req *http.Request
-	var res *http.Response
-	var requestUrl *url.URL
 	var ctx = context.Background()
 	if request.Ctx != nil {
 		ctx = request.Ctx
@@ -139,8 +103,9 @@ func (c *Client) Send(request Request) (Response, error) {
 		defer cancel()
 	}
 
+	var requestUrl *url.URL
 	if requestUrl, err = url.Parse(request.Url); err != nil {
-		return result, fmt.Errorf("parse url %s: %w", request.Url, err)
+		return Response{}, fmt.Errorf("parse url %s: %w", request.Url, err)
 	}
 	if len(request.Queries) > 0 {
 		var queries = requestUrl.Query()
@@ -151,36 +116,39 @@ func (c *Client) Send(request Request) (Response, error) {
 		}
 		requestUrl.RawQuery = queries.Encode()
 	}
-	if request.Debug {
-		fmt.Println(requestUrl.String())
-	}
-	if req, err = http.NewRequestWithContext(ctx, request.Method.String(), requestUrl.String(), request.Body); err != nil {
-		return result, fmt.Errorf("create request url %s: %w", request.Url, err)
+	var req *http.Request
+	if req, err = http.NewRequestWithContext(ctx, string(request.Method), requestUrl.String(), request.Body); err != nil {
+		return Response{}, fmt.Errorf("create request url %s: %w", request.Url, err)
 	}
 	if len(request.Headers) > 0 {
 		for k, v := range request.Headers {
 			req.Header.Add(k, v)
 		}
 	}
-	req.Header.Add("Content-Type", request.ContentType.String())
-
+	if request.ContentType != "" {
+		req.Header.Add("Content-Type", string(request.ContentType))
+	}
+	var res *http.Response
 	if res, err = c.client.Do(req); err != nil {
-		return result, fmt.Errorf("do request url %s: %w", request.Url, err)
+		return Response{}, fmt.Errorf("do request url %s: %w", request.Url, err)
+	}
+	if request.Debug {
+		fmt.Printf("request: %s, status: %d", requestUrl.String(), res.StatusCode)
 	}
 	defer res.Body.Close()
 	var maxSize = request.MaxSize
 	if maxSize == 0 {
 		maxSize = 50 << 20
 	}
+	var content []byte
 	if content, err = io.ReadAll(io.LimitReader(res.Body, maxSize)); err != nil {
-		return result, fmt.Errorf("read request url %s: %w", request.Url, err)
+		return Response{}, fmt.Errorf("read request url %s: %w", request.Url, err)
 	}
 
 	if res.StatusCode >= 400 {
 		err = errors.New("bad status code " + strconv.Itoa(res.StatusCode) + ". Description:" + string(content))
-		return result, fmt.Errorf("bad status request url %s: %w", request.Url, err)
+		return Response{}, fmt.Errorf("bad status request url %s: %w", request.Url, err)
 	}
-
 	return Response{
 		Data:   content,
 		Status: res.StatusCode,
