@@ -147,7 +147,12 @@ func (c *Client) Send(request Request) (Response, error) {
 
 	if res.StatusCode >= 400 {
 		err = errors.New("bad status code " + strconv.Itoa(res.StatusCode) + ". Description:" + string(content))
-		return Response{}, fmt.Errorf("bad status request url %s: %w", request.Url, err)
+		return Response{
+				Data:   content,
+				Status: res.StatusCode,
+				Header: res.Header,
+			},
+			fmt.Errorf("bad status request url %s: %w", request.Url, err)
 	}
 	return Response{
 		Data:   content,
