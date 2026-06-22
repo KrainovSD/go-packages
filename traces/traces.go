@@ -9,6 +9,7 @@ import (
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
@@ -163,6 +164,15 @@ func (t *Provider) StartAsync(parentCtx context.Context, name string, attributes
 	return asyncCtx, func() {
 		asyncSpan.End()
 	}
+}
+
+func (t *Provider) setError(ctx context.Context, err error) {
+	var span = trace.SpanFromContext(ctx)
+	if !span.IsRecording() {
+		return
+	}
+	span.SetStatus(codes.Error, err.Error())
+	span.RecordError(err)
 }
 
 func (t *Provider) SetAttributes(ctx context.Context, attributes ...attribute.KeyValue) {
