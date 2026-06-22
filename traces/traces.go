@@ -94,6 +94,10 @@ func (t *Provider) Exist() bool {
 	return t.provider != nil
 }
 
+func (t *Provider) GetTracer() trace.Tracer {
+	return t.tracer
+}
+
 func (t *Provider) Close(ctx context.Context) {
 	if !t.Exist() {
 		return
