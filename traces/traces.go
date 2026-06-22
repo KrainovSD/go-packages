@@ -166,7 +166,7 @@ func (t *Provider) StartAsync(parentCtx context.Context, name string, attributes
 	}
 }
 
-func (t *Provider) setError(ctx context.Context, err error) {
+func (t *Provider) SetError(ctx context.Context, err error) {
 	var span = trace.SpanFromContext(ctx)
 	if !span.IsRecording() {
 		return
