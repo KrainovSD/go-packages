@@ -16,7 +16,7 @@ type Cradle struct {
 	Api     *api.Client
 	Log     *slog.Logger
 	Conf    *config.Config
-	Traces  *traces.TracesProvider
+	Traces  *traces.Provider
 	Metrics *metrics.MetricsProvider
 	Db      *pgxpool.Pool
 	Redis   redis.UniversalClient

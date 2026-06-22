@@ -26,7 +26,7 @@ import (
 
 type Server struct {
 	Logger         *slog.Logger
-	Traces         *traces.TracesProvider
+	Traces         *traces.Provider
 	Metrics        *metrics.MetricsProvider
 	StaticMux      *http.ServeMux
 	ApiMux         *http.ServeMux
@@ -84,7 +84,7 @@ func Create(opts *ServerOptions) *Server {
 		Level:     opts.LogLevel,
 		AddSource: false,
 	}))
-	var tracesProvider = traces.CreateTracesProvider(startupCtx, traces.TraceOptions{
+	var tracesProvider = traces.CreateTracesProvider(startupCtx, traces.ProviderOptions{
 		Url:      opts.OtlpExporterUrl,
 		Protocol: opts.OtlpProtocol,
 		Service:  opts.ServiceName,

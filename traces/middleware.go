@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
+
+	"go.opentelemetry.io/otel/attribute"
 )
 
 type Writer interface {
@@ -12,23 +14,23 @@ type Writer interface {
 }
 
 type MiddlewareOptions struct {
-	Traces        *TracesProvider
+	Traces        *Provider
 	ExcludeStatic bool
 }
 
-type TracesMiddleware struct {
+type Middleware struct {
 	excludeStatic bool
-	traces        *TracesProvider
+	traces        *Provider
 }
 
-func MiddlewareCreate(opts *MiddlewareOptions) *TracesMiddleware {
-	return &TracesMiddleware{
+func MiddlewareCreate(opts *MiddlewareOptions) *Middleware {
+	return &Middleware{
 		traces:        opts.Traces,
 		excludeStatic: opts.ExcludeStatic,
 	}
 }
 
-func (m *TracesMiddleware) Register(next http.Handler) http.Handler {
+func (m *Middleware) Register(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var ctx context.Context
 		var skip bool
@@ -57,7 +59,7 @@ func (m *TracesMiddleware) Register(next http.Handler) http.Handler {
 					status = writer.Status()
 				}
 			}
-			m.traces.SetAttributes(ctx, "status", status)
+			m.traces.SetAttributes(ctx, attribute.Int("status", status))
 		}
 	})
 }

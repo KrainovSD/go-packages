@@ -19,20 +19,20 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-type TracesProvider struct {
+type Provider struct {
 	provider *sdktrace.TracerProvider
 	tracer   trace.Tracer
 }
 
-type TraceOptions struct {
+type ProviderOptions struct {
 	Url      string
 	Protocol string
 	Service  string
 	Logger   *slog.Logger
 }
 
-func CreateTracesProvider(ctx context.Context, opts TraceOptions) *TracesProvider {
-	var traceProvider TracesProvider
+func CreateTracesProvider(ctx context.Context, opts ProviderOptions) *Provider {
+	var traceProvider Provider
 	if opts.Url == "" {
 		opts.Logger.LogAttrs(context.Background(), slog.LevelWarn, "otlp", slog.String("error", "required otlp exporter url env for traces"))
 		return &traceProvider
@@ -84,24 +84,24 @@ func CreateTracesProvider(ctx context.Context, opts TraceOptions) *TracesProvide
 			propagation.Baggage{},
 		),
 	)
-	return &TracesProvider{
+	return &Provider{
 		provider: provider,
 		tracer:   otel.Tracer(opts.Service),
 	}
 }
 
-func (t *TracesProvider) Exist() bool {
+func (t *Provider) Exist() bool {
 	return t.provider != nil
 }
 
-func (t *TracesProvider) Close(ctx context.Context) {
+func (t *Provider) Close(ctx context.Context) {
 	if !t.Exist() {
 		return
 	}
 	t.provider.Shutdown(ctx)
 }
 
-func (t *TracesProvider) StartRequest(r *http.Request) (context.Context, func()) {
+func (t *Provider) StartRequest(r *http.Request) (context.Context, func()) {
 	if !t.Exist() {
 		return r.Context(), func() {}
 	}
@@ -123,20 +123,59 @@ func (t *TracesProvider) StartRequest(r *http.Request) (context.Context, func())
 	}
 }
 
-func (t *TracesProvider) Start(rootCtx context.Context, name string) (context.Context, func()) {
+func (t *Provider) Start(rootCtx context.Context, name string, attributes ...attribute.KeyValue) (context.Context, func()) {
 	if !t.Exist() {
 		return rootCtx, func() {}
 	}
-
-	var span trace.Span
-	var ctx context.Context
-	ctx, span = t.tracer.Start(rootCtx, name)
+	var ctx, span = t.tracer.Start(rootCtx, name, trace.WithAttributes(attributes...))
 	return ctx, func() {
 		span.End()
 	}
 }
 
-func (t *TracesProvider) GetTraceId(ctx context.Context) *string {
+func (t *Provider) StartAsync(parentCtx context.Context, name string, attributes ...attribute.KeyValue) (context.Context, func()) {
+	if !t.Exist() {
+		return context.Background(), func() {}
+	}
+	var parentSpan = trace.SpanFromContext(parentCtx).SpanContext()
+	if !parentSpan.IsValid() {
+		return context.Background(), func() {}
+	}
+	var attrs = make([]attribute.KeyValue, 0, 2+len(attributes))
+	attrs = append(attrs, attribute.String("parent.trace_id", parentSpan.TraceID().String()))
+	attrs = append(attrs, attribute.String("parent.span_id", parentSpan.SpanID().String()))
+	if len(attributes) > 0 {
+		attrs = append(attrs, attributes...)
+	}
+	var asyncCtx, asyncSpan = t.tracer.Start(
+		context.Background(),
+		name,
+		trace.WithSpanKind(trace.SpanKindConsumer),
+		trace.WithLinks(trace.Link{
+			SpanContext: parentSpan,
+		}),
+		trace.WithAttributes(attrs...),
+	)
+	return asyncCtx, func() {
+		asyncSpan.End()
+	}
+}
+
+func (t *Provider) SetAttributes(ctx context.Context, attributes ...attribute.KeyValue) {
+	if len(attributes) == 0 {
+		return
+	}
+	if !t.Exist() {
+		return
+	}
+	var span = trace.SpanFromContext(ctx)
+	if span == nil || !span.IsRecording() {
+		return
+	}
+	span.SetAttributes(attributes...)
+}
+
+func (t *Provider) GetTraceId(ctx context.Context) *string {
 	if !t.Exist() {
 		return nil
 	}
@@ -149,42 +188,4 @@ func (t *TracesProvider) GetTraceId(ctx context.Context) *string {
 		return nil
 	}
 	return &traceId
-}
-
-func (t *TracesProvider) SetAttributes(ctx context.Context, keyValues ...any) {
-	if !t.Exist() {
-		return
-	}
-
-	if len(keyValues) == 0 {
-		return
-	}
-
-	var span = trace.SpanFromContext(ctx)
-	if span == nil || !span.IsRecording() {
-		return
-	}
-
-	var attrs []attribute.KeyValue
-	for i := 0; i < len(keyValues); i += 2 {
-		var key, ok = keyValues[i].(string)
-		if !ok {
-			continue
-		}
-		var value = keyValues[i+1]
-		switch v := value.(type) {
-		case string:
-			attrs = append(attrs, attribute.String(key, v))
-		case int:
-			attrs = append(attrs, attribute.Int(key, v))
-		case int64:
-			attrs = append(attrs, attribute.Int64(key, v))
-		case float64:
-			attrs = append(attrs, attribute.Float64(key, v))
-		case bool:
-			attrs = append(attrs, attribute.Bool(key, v))
-		}
-	}
-	span.SetAttributes(attrs...)
-
 }
