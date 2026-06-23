@@ -104,7 +104,7 @@ func ParseDisposition(disposition string) (string, string, string, error) {
 		}
 		if fileNameRune > 0 {
 			if fileNameRune >= len(FILE_NAME) {
-				if fieldNameRune == len(FILE_NAME) {
+				if fileNameRune == len(FILE_NAME) {
 					fieldNameRune++
 					filename = strings.Builder{}
 				}

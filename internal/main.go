@@ -51,17 +51,22 @@ func main() {
 			Pprof:           false,
 		},
 	})
-	var db *pgxpool.Pool
-	var kq *kafka.Producer
-	var red redis.UniversalClient
-	var fetch *api.Client
+	var crad *cradle.Cradle = &cradle.Cradle{
+		Log:     server.Logger,
+		Conf:    conf,
+		Traces:  server.Traces,
+		Metrics: server.Metrics,
+		Wg:      server.ShutdownWait(),
+	}
 	server.Hooks().OnPreStartup(func(ctx context.Context) (func(ctx context.Context), error) {
+		var db *pgxpool.Pool
 		if db, err = storage.NewPostgres(ctx, &storage.PostgresOptions{Connection: conf.Default.Postgres.Connection, Tracing: server.Traces.Exist()}); err != nil {
 			return nil, err
 		}
 		if err = pg.Init(db); err != nil {
 			return nil, err
 		}
+		var kq *kafka.Producer
 		if kq, err = queue.NewProducer(ctx, &queue.ProducerOptions{
 			Servers: conf.Default.Kafka.Servers,
 			SecurityOptions: queue.SecurityOptions{
@@ -78,6 +83,7 @@ func main() {
 		}); err != nil {
 			return nil, err
 		}
+		var red redis.UniversalClient
 		if red, err = storage.NewRedis(ctx, &storage.RedisOptions{
 			Addresses:  conf.Default.Redis.Addresses,
 			Username:   conf.Default.Redis.Username,
@@ -90,9 +96,15 @@ func main() {
 		}); err != nil {
 			return nil, err
 		}
+		var fetch *api.Client
 		if fetch, err = api.NewClient(&api.ClientOptions{Tracing: server.Traces.Exist()}); err != nil {
 			return nil, err
 		}
+
+		crad.Api = fetch
+		crad.Db = db
+		crad.Redis = red
+		crad.Queue = kq
 		return func(ctx context.Context) {
 			db.Close()
 			kq.Close()
@@ -100,16 +112,6 @@ func main() {
 			fetch.Close()
 		}, nil
 	})
-	var crad *cradle.Cradle = &cradle.Cradle{
-		Api:     fetch,
-		Log:     server.Logger,
-		Conf:    conf,
-		Traces:  server.Traces,
-		Metrics: server.Metrics,
-		Db:      db,
-		Redis:   red,
-		Queue:   kq,
-	}
 	server.Mux().ExtendMiddlewareGroup(
 		"full",
 		"test",

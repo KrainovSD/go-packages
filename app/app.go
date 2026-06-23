@@ -116,6 +116,10 @@ func New(config *Config) *App {
 	}
 }
 
+func (a *App) ShutdownWait() *sync.WaitGroup {
+	return a.wg
+}
+
 func (a *App) Mux() *GlobalMux {
 	return a.mux
 }
