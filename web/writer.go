@@ -2,66 +2,91 @@ package web
 
 import (
 	"compress/gzip"
-	"encoding/json"
 	"net/http"
 	"strings"
 )
 
 type WriterMiddlewareOptions struct {
-	GzipLevel int
-	Gzip      bool
+	CompressLevel int
+	Compress      bool
+	NeedCompress  func(header http.Header) bool
 }
 
 type WriterMiddleware struct {
-	gzipLevel int
-	gzip      bool
+	compressLevel int
+	compress      bool
+	needCompress  func(header http.Header) bool
 }
 
-func WriterMiddlewareCreate(opts *WriterMiddlewareOptions) *WriterMiddleware {
+func CreateWriterMiddleware(opts *WriterMiddlewareOptions) *WriterMiddleware {
 	return &WriterMiddleware{
-		gzipLevel: opts.GzipLevel,
-		gzip:      opts.Gzip,
+		compressLevel: opts.CompressLevel,
+		compress:      opts.Compress,
+		needCompress:  opts.NeedCompress,
 	}
 }
 
 func (m *WriterMiddleware) Register(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var writer = NewResponseWriter(w, strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") && m.gzip, m.gzipLevel)
+		var writer = NewResponseWriter(&ResponseWriterOptions{
+			OriginalWriter: w,
+			Compress:       m.compress && canCompress(w.Header()),
+			CompressLevel:  m.compressLevel,
+			NeedCompress:   m.needCompress,
+		})
 		next.ServeHTTP(writer, r)
-		if gzipWriter, ok := writer.(*ResponseWriter); ok {
-			if gzipWriter.compressWriter != nil {
-				gzipWriter.compressWriter.Close()
+		if writer, ok := writer.(*ResponseWriter); ok {
+			if writer.compressWriter != nil {
+				writer.compressWriter.Close()
 			}
 		}
 	})
 }
 
+func canCompress(header http.Header) bool {
+	var encoding = header["Accept-Encoding"]
+	if len(encoding) == 0 {
+		return false
+	}
+	return strings.Contains(encoding[0], "gzip")
+}
+
+type MiddlewarePanic struct {
+	Err   error
+	Stack []byte
+}
+
 type ResponseWriter struct {
+	panic          *MiddlewarePanic
+	err            error
 	compressWriter *gzip.Writer
 	originalWriter http.ResponseWriter
 	status         int
-	err            string
 	closedHeader   bool
-	canCompress    bool
-	gzipLevel      int
+	compress       bool
+	compressLevel  int
+	needCompress   func(header http.Header) bool
 }
 
-func NewResponseWriter(originalWriter http.ResponseWriter, canCompress bool, gzipLevel int) http.ResponseWriter {
+type ResponseWriterOptions struct {
+	OriginalWriter http.ResponseWriter
+	Compress       bool
+	CompressLevel  int
+	NeedCompress   func(header http.Header) bool
+}
 
+func NewResponseWriter(opts *ResponseWriterOptions) http.ResponseWriter {
 	return &ResponseWriter{
-		originalWriter: originalWriter,
+		originalWriter: opts.OriginalWriter,
 		status:         0,
-		canCompress:    canCompress,
-		gzipLevel:      gzipLevel,
+		compress:       opts.Compress,
+		compressLevel:  opts.CompressLevel,
+		needCompress:   opts.NeedCompress,
 	}
 }
 
 func (g *ResponseWriter) Status() int {
 	return g.status
-}
-
-func (g *ResponseWriter) Error() string {
-	return g.err
 }
 
 func (g *ResponseWriter) Written() bool {
@@ -71,11 +96,6 @@ func (g *ResponseWriter) Written() bool {
 func (g *ResponseWriter) Write(b []byte) (int, error) {
 	if !g.closedHeader {
 		g.WriteHeader(http.StatusOK)
-	}
-	if g.status >= 400 {
-		var response WebErrorResponse
-		_ = json.Unmarshal(b, &response)
-		g.err = response.Description
 	}
 	if g.compressWriter != nil {
 		return g.compressWriter.Write(b)
@@ -87,7 +107,7 @@ func (g *ResponseWriter) WriteHeader(statusCode int) {
 	if g.Written() {
 		return
 	}
-	if strings.HasPrefix(g.originalWriter.Header().Get("Content-Type"), "application/json") && g.canCompress {
+	if g.compress && (g.needCompress == nil || g.needCompress(g.originalWriter.Header())) {
 		g.SetGzipWriter()
 		g.originalWriter.Header().Set("Content-Encoding", "gzip")
 		g.originalWriter.Header().Set("Vary", "Accept-Encoding")
@@ -105,12 +125,31 @@ func (g *ResponseWriter) SetGzipWriter() {
 	var gz *gzip.Writer
 	var err error
 	var level = gzip.DefaultCompression
-	if g.gzipLevel != 0 {
-		level = g.gzipLevel
+	if g.compressLevel != 0 {
+		level = g.compressLevel
 	}
 	// should close after write
 	if gz, err = gzip.NewWriterLevel(g.originalWriter, level); err != nil {
 		return
 	}
 	g.compressWriter = gz
+}
+
+func (g *ResponseWriter) SetError(err error) {
+	g.err = err
+}
+
+func (g *ResponseWriter) GetError() error {
+	return g.err
+}
+
+func (g *ResponseWriter) SetPanic(err error, stack []byte) {
+	g.panic = &MiddlewarePanic{
+		Err:   err,
+		Stack: stack,
+	}
+}
+
+func (g *ResponseWriter) GetPanic() *MiddlewarePanic {
+	return g.panic
 }

@@ -61,7 +61,7 @@ func Create() *Config {
 	config.KAFKA_USER = os.Getenv("KAFKA_USER")
 	config.KAFKA_PASSWORD = os.Getenv("KAFKA_PASSWORD")
 
-	config.REDIS_ADDRESSES = helpers.ParseEnvSlice(os.Getenv("REDIS_ADDRESS"))
+	config.REDIS_ADDRESSES = helpers.ParseEnvSlice(os.Getenv("REDIS_ADDRESSES"))
 	config.REDIS_PASSWORD = os.Getenv("REDIS_PASSWORD")
 	config.REDIS_MODE = os.Getenv("REDIS_MODE")
 	var redisDb = helpers.ParseEnvInt(os.Getenv("REDIS_DB"))

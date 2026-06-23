@@ -114,24 +114,25 @@ func Create(opts *ServerOptions) *Server {
 			Key:           helpers.StrToPtr(opts.LogTraceIdKey),
 		}))
 	}
-
-	var writerMiddleware = web.WriterMiddlewareCreate(&web.WriterMiddlewareOptions{
-		Gzip:      opts.CompressRequest,
-		GzipLevel: gzip.DefaultCompression,
-	})
-	var tracesMiddleware = traces.MiddlewareCreate(&traces.MiddlewareOptions{
-		Traces:        tracesProvider,
-		ExcludeStatic: true,
-	})
-	var metricsMiddleware = metrics.MiddlewareCreate(metrics.MiddlewareOptions{
-		Metrics: metricsProvider,
-	})
-	var loggerMiddleware = logs.MiddlewareCreate(&logs.MiddlewareOptions{
+	var goalkeeperMiddleware = web.CreateGoalkeeperMiddleware()
+	var loggerMiddleware = logs.CreateMiddleware(&logs.MiddlewareOptions{
 		Log:           logger,
 		ExcludeStatic: true,
 	})
+	var metricsMiddleware = metrics.CreateMiddleware(metrics.MiddlewareOptions{
+		Metrics: metricsProvider,
+	})
+	var tracesMiddleware = traces.CreateMiddleware(&traces.MiddlewareOptions{
+		Traces:        tracesProvider,
+		ExcludeStatic: true,
+	})
+	var writerMiddleware = web.CreateWriterMiddleware(&web.WriterMiddlewareOptions{
+		Compress:      opts.CompressRequest,
+		CompressLevel: gzip.DefaultCompression,
+	})
 	var apiMux = http.NewServeMux()
 	var apiHandler = http.Handler(apiMux)
+	apiHandler = goalkeeperMiddleware.Register(apiHandler)
 	apiHandler = loggerMiddleware.Register(apiHandler)
 	apiHandler = metricsMiddleware.Register(apiHandler)
 	apiHandler = tracesMiddleware.Register(apiHandler)

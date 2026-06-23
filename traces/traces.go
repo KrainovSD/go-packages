@@ -2,9 +2,7 @@ package traces
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
-	"net/http"
 	"strings"
 
 	"go.opentelemetry.io/otel"
@@ -104,28 +102,6 @@ func (t *Provider) Close(ctx context.Context) {
 		return
 	}
 	t.provider.Shutdown(ctx)
-}
-
-func (t *Provider) StartRequest(r *http.Request) (context.Context, func()) {
-	if !t.Exist() {
-		return r.Context(), func() {}
-	}
-
-	var ctx = otel.GetTextMapPropagator().Extract(r.Context(), propagation.HeaderCarrier(r.Header))
-	var spanName = fmt.Sprintf("HTTP %s %s", r.Method, r.URL.Path)
-	var span trace.Span
-	ctx, span = t.tracer.Start(ctx, spanName, trace.WithSpanKind(trace.SpanKindServer), trace.WithAttributes(
-		attribute.String("http.method", r.Method),
-		attribute.String("http.url", r.URL.String()),
-		attribute.String("http.scheme", r.URL.Scheme),
-		attribute.String("http.host", r.Host),
-		attribute.String("http.remote", r.RemoteAddr),
-		attribute.String("http.user_agent", r.UserAgent()),
-	))
-
-	return ctx, func() {
-		span.End()
-	}
 }
 
 func (t *Provider) Start(rootCtx context.Context, name string, attributes ...attribute.KeyValue) (context.Context, func()) {

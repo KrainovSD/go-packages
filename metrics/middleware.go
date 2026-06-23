@@ -12,7 +12,7 @@ type Middleware struct {
 	metrics *MetricsProvider
 }
 
-func MiddlewareCreate(opts MiddlewareOptions) *Middleware {
+func CreateMiddleware(opts MiddlewareOptions) *Middleware {
 	return &Middleware{
 		metrics: opts.Metrics,
 	}

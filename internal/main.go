@@ -35,7 +35,7 @@ func main() {
 		LogLevel:        conf.LOG_LEVEL,
 		LogColor:        conf.LOG_COLOR,
 		LogTraceIdKey:   "TraceId",
-		ServiceName:     conf.SERVICE_NAME,
+		ServiceName:     "test-service",
 		OtlpExporterUrl: conf.OTLP_EXPORTER_URL,
 		OtlpProtocol:    conf.OTLP_PROTOCOL,
 		CompressRequest: conf.COMPRESS_REQUEST,

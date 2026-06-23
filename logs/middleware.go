@@ -1,22 +1,13 @@
 package logs
 
 import (
-	"fmt"
 	"log/slog"
 	"net/http"
 	"path/filepath"
-	"runtime/debug"
-	"slices"
-	"strings"
 	"time"
 
 	"github.com/KrainovSD/go-packages/web"
 )
-
-type Writer interface {
-	Status() int
-	Error() string
-}
 
 type MiddlewareOptions struct {
 	Log           *slog.Logger
@@ -28,7 +19,7 @@ type Middleware struct {
 	log           *slog.Logger
 }
 
-func MiddlewareCreate(opts *MiddlewareOptions) *Middleware {
+func CreateMiddleware(opts *MiddlewareOptions) *Middleware {
 	return &Middleware{
 		log:           opts.Log,
 		excludeStatic: opts.ExcludeStatic,
@@ -38,51 +29,41 @@ func MiddlewareCreate(opts *MiddlewareOptions) *Middleware {
 func (m *Middleware) Register(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var start = time.Now()
-		var hostAttr = slog.String("host", r.Host)
-		var userAgentAttr = slog.String("userAgent", r.UserAgent())
-		var methodAttr = slog.String("method", r.Method)
-		var urlAttr = slog.String("url", r.URL.String())
-
-		defer func() {
-			if err := recover(); err != nil {
-				var durationAttr = slog.Duration("duration", time.Since(start))
-				var errorMessageAttr = slog.Any("error", err)
-				var stackTrace = debug.Stack()
-				var stackTraceAttr = slog.String("stack", string(stackTrace))
-				var statusAttr slog.Attr = slog.Int("status", 500)
-				m.log.LogAttrs(r.Context(), slog.LevelError, "request", hostAttr, userAgentAttr, methodAttr, urlAttr, statusAttr, durationAttr, stackTraceAttr, errorMessageAttr)
-				web.SendError(w, web.ErrorResponse{Error: fmt.Errorf("something went wrong"), Status: 500})
-			}
-		}()
 		next.ServeHTTP(w, r)
-		if m.excludeStatic {
-			var ext = strings.ToLower(filepath.Ext(r.URL.Path))
-			if ext != "" {
-				return
-			}
+		if m.excludeStatic && filepath.Ext(r.URL.Path) != "" {
+			return
 		}
-		var durationAttr = slog.Duration("duration", time.Since(start))
-		var statusAttr slog.Attr = slog.Int("status", 200)
+		var attrs = make([]slog.Attr, 0, 10)
+		attrs = append(attrs, slog.String("host", r.Host))
+		attrs = append(attrs, slog.String("userAgent", web.GetUserAgent(r)))
+		attrs = append(attrs, slog.String("method", r.Method))
+		attrs = append(attrs, slog.String("path", r.URL.Path))
+		if r.URL.RawQuery != "" {
+			attrs = append(attrs, slog.String("queries", r.URL.RawQuery))
+		}
+		attrs = append(attrs, slog.Duration("duration", time.Since(start)))
 		var logLevel slog.Level = slog.LevelInfo
-		var attrs = []slog.Attr{hostAttr, userAgentAttr, methodAttr, urlAttr, statusAttr, durationAttr}
-		if writer, ok := w.(Writer); ok {
+		if writer, ok := w.(*web.ResponseWriter); ok {
+			var status = 200
 			if writer.Status() != 0 {
-				var index = slices.IndexFunc(attrs, func(a slog.Attr) bool {
-					return a.Key == "status"
-				})
-				if index != -1 {
-					attrs[index] = slog.Int("status", writer.Status())
-				}
+				status = writer.Status()
 			}
-			if writer.Status() >= 400 && writer.Status() < 500 {
+			attrs = append(attrs, slog.Int("status", status))
+			if status >= 400 && status < 500 {
 				logLevel = slog.LevelWarn
-			} else if writer.Status() >= 500 {
+			} else if status >= 500 {
 				logLevel = slog.LevelError
 			}
-			var err = writer.Error()
-			if err != "" {
-				attrs = append(attrs, slog.String("error", err))
+			var err = writer.GetError()
+			var p = writer.GetPanic()
+			if p != nil {
+				attrs = append(attrs, slog.String("error", p.Err.Error()))
+				attrs = append(attrs, slog.String("stack", string(p.Stack)))
+			} else if err != nil {
+				attrs = append(attrs, slog.String("error", err.Error()))
 			}
+		} else {
+			attrs = append(attrs, slog.Int("status", 200))
 		}
 		m.log.LogAttrs(r.Context(), logLevel, "request", attrs...)
 	})
