@@ -5,20 +5,30 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/KrainovSD/go-packages/app"
 	"github.com/KrainovSD/go-packages/internal/modules/cradle"
 )
 
 type StatusControllerOptions struct {
-	M      *http.ServeMux
+	M      *app.Mux
 	Cradle *cradle.Cradle
 }
 
 type statusController struct {
-	m *http.ServeMux
+	m *app.Mux
 }
 
 type Health struct {
 	Ok bool `json:"ok"`
+}
+
+func Register(o StatusControllerOptions) {
+	var c = statusController{
+		m: o.M,
+	}
+	o.M.Handle("GET /api/ping", http.HandlerFunc(c.Ping))
+	o.M.Handle("GET /api/healthz", http.HandlerFunc(c.Healthcheck))
+	o.M.Handle("GET /api/metrics", o.Cradle.Metrics.Handle())
 }
 
 // @Summary Ping
@@ -48,14 +58,4 @@ func (c *statusController) Healthcheck(w http.ResponseWriter, req *http.Request)
 // @Router /api/metrics [get]
 func (c *statusController) Metrics(w http.ResponseWriter, req *http.Request) {
 
-}
-
-func Register(o StatusControllerOptions) {
-
-	var c = statusController{
-		m: o.M,
-	}
-	o.M.HandleFunc("GET /api/ping", c.Ping)
-	o.M.HandleFunc("GET /api/healthz", c.Healthcheck)
-	o.M.Handle("GET /api/metrics", o.Cradle.Metrics.Handle())
 }

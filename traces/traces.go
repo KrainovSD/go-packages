@@ -30,7 +30,7 @@ type ProviderOptions struct {
 	Logger   *slog.Logger
 }
 
-func CreateTracesProvider(ctx context.Context, opts ProviderOptions) *Provider {
+func NewProvider(ctx context.Context, opts *ProviderOptions) *Provider {
 	var traceProvider Provider
 	if opts.Url == "" {
 		opts.Logger.LogAttrs(context.Background(), slog.LevelWarn, "otlp", slog.String("error", "required otlp exporter url env for traces"))
@@ -165,7 +165,7 @@ func (t *Provider) SetAttributes(ctx context.Context, attributes ...attribute.Ke
 	span.SetAttributes(attributes...)
 }
 
-func (t *Provider) GetTraceId(ctx context.Context) *string {
+func (t *Provider) GetTraceID(ctx context.Context) *string {
 	if !t.Exist() {
 		return nil
 	}

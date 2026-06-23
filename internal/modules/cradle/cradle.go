@@ -17,7 +17,7 @@ type Cradle struct {
 	Log     *slog.Logger
 	Conf    *config.Config
 	Traces  *traces.Provider
-	Metrics *metrics.MetricsProvider
+	Metrics *metrics.Provider
 	Db      *pgxpool.Pool
 	Redis   redis.UniversalClient
 	Queue   *kafka.Producer

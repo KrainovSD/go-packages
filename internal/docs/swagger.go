@@ -3,6 +3,8 @@ package docs
 import (
 	_ "embed"
 	"net/http"
+
+	"github.com/KrainovSD/go-packages/app"
 )
 
 //go:embed swagger.html
@@ -18,8 +20,8 @@ func returnSwaggerSpec(w http.ResponseWriter, r *http.Request) {
 	w.Write(swaggerSpec)
 }
 
-func Register(m *http.ServeMux, sm *http.ServeMux) {
-	m.HandleFunc("GET /api/docs", returnSwaggerHTML)
-	m.HandleFunc("GET /api/docs/", returnSwaggerHTML)
-	sm.HandleFunc("/openapi.json", returnSwaggerSpec)
+func Register(m *app.Mux, sm *app.Mux) {
+	m.Handle("GET /api/docs", http.HandlerFunc(returnSwaggerHTML))
+	m.Handle("GET /api/docs/", http.HandlerFunc(returnSwaggerHTML))
+	sm.Handle("/openapi.json", http.HandlerFunc(returnSwaggerSpec))
 }

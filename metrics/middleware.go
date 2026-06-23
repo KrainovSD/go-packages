@@ -5,23 +5,15 @@ import (
 )
 
 type MiddlewareOptions struct {
-	Metrics *MetricsProvider
+	Metrics *Provider
 }
 
-type Middleware struct {
-	metrics *MetricsProvider
-}
-
-func CreateMiddleware(opts MiddlewareOptions) *Middleware {
-	return &Middleware{
-		metrics: opts.Metrics,
+func NewMiddleware(opts *MiddlewareOptions) func(next http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			opts.Metrics.IncreaseConnectionsHTTP()
+			defer opts.Metrics.DecreaseConnectionsHTTP()
+			next.ServeHTTP(w, r)
+		})
 	}
-}
-
-func (m *Middleware) Register(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		m.metrics.IncreaseConnectionsHTTP()
-		defer m.metrics.DecreaseConnectionsHTTP()
-		next.ServeHTTP(w, r)
-	})
 }

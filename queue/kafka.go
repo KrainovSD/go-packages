@@ -20,13 +20,13 @@ type SecurityOptions struct {
 	Password         string
 }
 
-type CreateProducerOptions struct {
+type ProducerOptions struct {
 	SecurityOptions SecurityOptions
 	Servers         []string
 	Linger          int
 }
 
-func CreateProducer(ctx context.Context, opts *CreateProducerOptions) (*kafka.Producer, error) {
+func NewProducer(ctx context.Context, opts *ProducerOptions) (*kafka.Producer, error) {
 	var linger = 5
 	if opts.Linger != 0 {
 		linger = opts.Linger
@@ -49,7 +49,7 @@ func CreateProducer(ctx context.Context, opts *CreateProducerOptions) (*kafka.Pr
 	return producer, nil
 }
 
-type CreateConsumerOptions struct {
+type ConsumerOptions struct {
 	SecurityOptions SecurityOptions
 	Servers         []string
 	ConsumerGroup   string
@@ -57,7 +57,7 @@ type CreateConsumerOptions struct {
 	AutoOffsetReset string // earliest, latest
 }
 
-func CreateConsumer(ctx context.Context, opts *CreateConsumerOptions) (*kafka.Consumer, error) {
+func NewConsumer(ctx context.Context, opts *ConsumerOptions) (*kafka.Consumer, error) {
 	var cm = &kafka.ConfigMap{
 		"bootstrap.servers":  strings.Join(opts.Servers, ","),
 		"group.id":           opts.ConsumerGroup,

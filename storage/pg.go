@@ -10,12 +10,12 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-type CreatePgOptions struct {
+type PostgresOptions struct {
 	Connection string
 	Tracing    bool
 }
 
-func CreatePg(ctx context.Context, opts *CreatePgOptions) (*pgxpool.Pool, error) {
+func NewPostgres(ctx context.Context, opts *PostgresOptions) (*pgxpool.Pool, error) {
 	var pool *pgxpool.Pool
 	var err error
 	var config *pgxpool.Config

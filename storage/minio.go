@@ -10,7 +10,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
-type CreateMinioOptions struct {
+type MinioOptions struct {
 	Url          string
 	AccessKey    string
 	SecretKey    string
@@ -21,7 +21,7 @@ type CreateMinioOptions struct {
 	Tracing      bool
 }
 
-func CreateMinio(ctx context.Context, opts *CreateMinioOptions) (*minio.Client, error) {
+func NewMinio(ctx context.Context, opts *MinioOptions) (*minio.Client, error) {
 	var creds *credentials.Credentials
 	if opts.AccessKey != "" && opts.SecretKey != "" {
 		creds = credentials.NewStaticV4(opts.AccessKey, opts.SecretKey, "")

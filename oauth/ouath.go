@@ -55,7 +55,7 @@ type OauthOptions struct {
 	Logout             func(ctx context.Context, token string) error
 }
 
-func Create(options *OauthOptions) (*Oauth, error) {
+func New(options *OauthOptions) (*Oauth, error) {
 	var err error
 
 	if err = options.validate(); err != nil {
@@ -243,7 +243,7 @@ type OauthProviderOptions struct {
 	IatLeewaySeconds int
 }
 
-func (o *Oauth) CreateOauthProvider(options *OauthProviderOptions) (*OauthProvider, error) {
+func (o *Oauth) NewProvider(options *OauthProviderOptions) (*OauthProvider, error) {
 	var err error
 	var provider *OauthProvider
 

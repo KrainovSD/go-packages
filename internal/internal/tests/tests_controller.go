@@ -4,12 +4,14 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/KrainovSD/go-packages/app"
 	"github.com/KrainovSD/go-packages/web"
 )
 
 type TestsControllerOptions struct {
-	SM *http.ServeMux
-	M  *http.ServeMux
+	TM *app.Mux
+	SM *app.Mux
+	M  *app.Mux
 	S  *TestsService
 }
 
@@ -21,8 +23,8 @@ func Register(o TestsControllerOptions) error {
 	var c = testsController{
 		s: o.S,
 	}
-	o.M.HandleFunc("GET /api/v1/tests", c.Test)
-	o.M.HandleFunc("GET /api/v2/tests", c.Test2)
+	o.M.Handle("GET /api/v1/tests", http.HandlerFunc(c.Test))
+	o.TM.Handle("GET /api/v2/tests", http.HandlerFunc(c.Test2))
 	return nil
 }
 

@@ -36,12 +36,12 @@ func (s *TestsService) Test(ctx context.Context) error {
 	var buf = make([]byte, 32)
 	rand.Read(buf)
 	if err = s.cradle.Queue.Produce(&kafka.Message{
-		TopicPartition: kafka.TopicPartition{Topic: &s.cradle.Conf.KAFKA_TOPIC},
+		TopicPartition: kafka.TopicPartition{Topic: &s.cradle.Conf.KafkaTopic},
 		Value:          buf,
 	}, nil); err != nil {
 		return fmt.Errorf("kafka produce: %w", err)
 	}
-	s.cradle.Log.Info("kafka test", "topic", s.cradle.Conf.KAFKA_TOPIC, "bytes", len(buf))
+	s.cradle.Log.Info("kafka test", "topic", s.cradle.Conf.KafkaTopic, "bytes", len(buf))
 
 	var key = "test:" + fmt.Sprintf("%d", time.Now().UnixNano())
 	var value = fmt.Sprintf("value-%x", buf[:4])

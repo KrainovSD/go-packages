@@ -9,15 +9,15 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
-type CreateClickHouseOptions struct {
+type ClickhouseOptions struct {
 	// max_open_conns, max_idle_conns, dial_timeout, conn_max_lifetime
-	Url string
+	Connection string
 	// only for http
 	Tracing bool
 }
 
-func CreateClickhouse(ctx context.Context, opts *CreateClickHouseOptions) (clickhouse.Conn, error) {
-	var clickOpts, err = clickhouse.ParseDSN(opts.Url)
+func NewClickhouse(ctx context.Context, opts *ClickhouseOptions) (clickhouse.Conn, error) {
+	var clickOpts, err = clickhouse.ParseDSN(opts.Connection)
 	if err != nil {
 		return nil, fmt.Errorf("parse clickhouse dsn: %w", err)
 	}

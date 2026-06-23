@@ -2,8 +2,8 @@ package router
 
 import (
 	"fmt"
-	"net/http"
 
+	"github.com/KrainovSD/go-packages/app"
 	"github.com/KrainovSD/go-packages/internal/docs"
 	"github.com/KrainovSD/go-packages/internal/internal/status"
 	"github.com/KrainovSD/go-packages/internal/internal/tests"
@@ -11,8 +11,9 @@ import (
 )
 
 type RoutesOptions struct {
-	SM     *http.ServeMux
-	M      *http.ServeMux
+	SM     *app.Mux
+	M      *app.Mux
+	TM     *app.Mux
 	Cradle *cradle.Cradle
 }
 
@@ -29,6 +30,7 @@ func InitRoutes(o *RoutesOptions) error {
 	if err = tests.Register(tests.TestsControllerOptions{
 		M:  o.M,
 		SM: o.SM,
+		TM: o.TM,
 		S:  testsService,
 	}); err != nil {
 		return fmt.Errorf("register c2m: %w", err)

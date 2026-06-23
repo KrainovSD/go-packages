@@ -6,41 +6,38 @@ import (
 	"strings"
 )
 
+type shouldCompress = func(w http.ResponseWriter) bool
+
 type WriterMiddlewareOptions struct {
-	CompressLevel int
-	Compress      bool
-	NeedCompress  func(header http.Header) bool
+	CompressLevel  int
+	Compress       bool
+	ShouldCompress func(w http.ResponseWriter) bool
 }
 
 type WriterMiddleware struct {
-	compressLevel int
-	compress      bool
-	needCompress  func(header http.Header) bool
+	compressLevel  int
+	compress       bool
+	shouldCompress shouldCompress
 }
 
-func CreateWriterMiddleware(opts *WriterMiddlewareOptions) *WriterMiddleware {
-	return &WriterMiddleware{
-		compressLevel: opts.CompressLevel,
-		compress:      opts.Compress,
-		needCompress:  opts.NeedCompress,
-	}
-}
-
-func (m *WriterMiddleware) Register(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var writer = NewResponseWriter(&ResponseWriterOptions{
-			OriginalWriter: w,
-			Compress:       m.compress && canCompress(w.Header()),
-			CompressLevel:  m.compressLevel,
-			NeedCompress:   m.needCompress,
-		})
-		next.ServeHTTP(writer, r)
-		if writer, ok := writer.(*ResponseWriter); ok {
-			if writer.compressWriter != nil {
-				writer.compressWriter.Close()
+func NewWriterMiddleware(opts *WriterMiddlewareOptions) func(next http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var writer = NewResponseWriter(&ResponseWriterOptions{
+				OriginalWriter: w,
+				Compress:       opts.Compress && canCompress(w.Header()),
+				CompressLevel:  opts.CompressLevel,
+				ShouldCompress: opts.ShouldCompress,
+			})
+			next.ServeHTTP(writer, r)
+			if writer, ok := writer.(*ResponseWriter); ok {
+				if writer.compressWriter != nil {
+					writer.compressWriter.Close()
+				}
 			}
-		}
-	})
+		})
+	}
+
 }
 
 func canCompress(header http.Header) bool {
@@ -65,14 +62,14 @@ type ResponseWriter struct {
 	closedHeader   bool
 	compress       bool
 	compressLevel  int
-	needCompress   func(header http.Header) bool
+	shouldCompress shouldCompress
 }
 
 type ResponseWriterOptions struct {
 	OriginalWriter http.ResponseWriter
 	Compress       bool
 	CompressLevel  int
-	NeedCompress   func(header http.Header) bool
+	ShouldCompress shouldCompress
 }
 
 func NewResponseWriter(opts *ResponseWriterOptions) http.ResponseWriter {
@@ -81,7 +78,7 @@ func NewResponseWriter(opts *ResponseWriterOptions) http.ResponseWriter {
 		status:         0,
 		compress:       opts.Compress,
 		compressLevel:  opts.CompressLevel,
-		needCompress:   opts.NeedCompress,
+		shouldCompress: opts.ShouldCompress,
 	}
 }
 
@@ -107,7 +104,7 @@ func (g *ResponseWriter) WriteHeader(statusCode int) {
 	if g.Written() {
 		return
 	}
-	if g.compress && (g.needCompress == nil || g.needCompress(g.originalWriter.Header())) {
+	if g.compress && (g.shouldCompress == nil || g.shouldCompress(g)) {
 		g.SetGzipWriter()
 		g.originalWriter.Header().Set("Content-Encoding", "gzip")
 		g.originalWriter.Header().Set("Vary", "Accept-Encoding")

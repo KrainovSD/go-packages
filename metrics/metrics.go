@@ -14,18 +14,18 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 )
 
-type MetricsProvider struct {
+type Provider struct {
 	registry          *prometheus.Registry
 	handler           http.Handler
 	activeConnections prometheus.Gauge
 }
 
-type MetricsProviderOpts struct {
+type ProviderOptions struct {
 	Service string
 	Logger  *slog.Logger
 }
 
-func CreateMetricsProvider(opts *MetricsProviderOpts) *MetricsProvider {
+func NewProvider(opts *ProviderOptions) *Provider {
 	if opts.Service == "" {
 		opts.Service = "unknown_golang"
 	}
@@ -46,7 +46,7 @@ func CreateMetricsProvider(opts *MetricsProviderOpts) *MetricsProvider {
 	var err error
 	if exporter, err = otelprom.New(otelprom.WithRegisterer(registry)); err != nil {
 		opts.Logger.Error("create metrics provider", "error", err.Error())
-		return &MetricsProvider{
+		return &Provider{
 			registry:          nil,
 			handler:           nil,
 			activeConnections: nil,
@@ -65,39 +65,39 @@ func CreateMetricsProvider(opts *MetricsProviderOpts) *MetricsProvider {
 		EnableOpenMetrics: false,
 	})
 
-	return &MetricsProvider{
+	return &Provider{
 		registry:          registry,
 		handler:           handler,
 		activeConnections: activeConnections,
 	}
 }
 
-func (p *MetricsProvider) Exist() bool {
+func (p *Provider) Exist() bool {
 	return p.registry != nil
 }
 
-func (p *MetricsProvider) Register(cs ...prometheus.Collector) {
+func (p *Provider) Register(cs ...prometheus.Collector) {
 	if p.registry == nil {
 		return
 	}
 	p.registry.MustRegister(cs...)
 }
 
-func (p *MetricsProvider) IncreaseConnectionsHTTP() {
+func (p *Provider) IncreaseConnectionsHTTP() {
 	if p.registry == nil {
 		return
 	}
 	p.activeConnections.Inc()
 }
 
-func (p *MetricsProvider) DecreaseConnectionsHTTP() {
+func (p *Provider) DecreaseConnectionsHTTP() {
 	if p.registry == nil {
 		return
 	}
 	p.activeConnections.Dec()
 }
 
-func (p *MetricsProvider) Handle() http.Handler {
+func (p *Provider) Handle() http.Handler {
 	if p.registry == nil {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusNoContent)

@@ -25,31 +25,31 @@ var ipHeaders = []ipHeader{
 
 func DetectIP(req *http.Request) string {
 	for _, h := range ipHeaders {
-		raw := req.Header.Get(h.name)
+		var raws = req.Header[h.name]
+		if len(raws) == 0 {
+			continue
+		}
+		var raw = raws[0]
 		if raw == "" {
 			continue
 		}
-
 		if h.rfc7239 {
 			if ip := parseForwardedHeader(raw); ip != "" {
 				return ip
 			}
 			continue
 		}
-
 		if h.commaSep {
 			if ip := parseFirstIP(raw); ip != "" {
 				return ip
 			}
 			continue
 		}
-
 		candidate := strings.TrimSpace(raw)
 		if net.ParseIP(candidate) != nil {
 			return candidate
 		}
 	}
-
 	var host, _, parseErr = net.SplitHostPort(req.RemoteAddr)
 	if parseErr != nil {
 		host = req.RemoteAddr

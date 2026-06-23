@@ -9,7 +9,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-type CreateRedisOptions struct {
+type RedisOptions struct {
 	Mode       string // standalone, sentinel, cluster
 	Addresses  []string
 	MasterName string
@@ -20,7 +20,7 @@ type CreateRedisOptions struct {
 	Metrics    bool
 }
 
-func CreateRedis(ctx context.Context, opts *CreateRedisOptions) (redis.UniversalClient, error) {
+func NewRedis(ctx context.Context, opts *RedisOptions) (redis.UniversalClient, error) {
 	if len(opts.Addresses) == 0 {
 		return nil, fmt.Errorf("empty redis addresses")
 	}

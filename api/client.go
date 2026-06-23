@@ -62,7 +62,7 @@ type ClientOptions struct {
 	MaxIdleConnsPerHost int
 }
 
-func CreateClient(opts ClientOptions) (*Client, error) {
+func NewClient(opts *ClientOptions) (*Client, error) {
 	var maxIdleConns = opts.MaxIdleConns
 	if maxIdleConns == 0 {
 		maxIdleConns = 100

@@ -1,14 +1,13 @@
 package web
 
 import (
-	"net"
 	"net/http"
 	"strings"
 )
 
 func GetProto(r *http.Request, custom string) string {
 	var proto string
-	var proxyHeader = r.Header[http.CanonicalHeaderKey("x-forwarded-proto")]
+	var proxyHeader = r.Header["X-Forwarded-Proto"]
 	var scheme = r.URL.Scheme
 
 	switch {
@@ -51,27 +50,13 @@ func GetLastPath(path string) string {
 	return path
 }
 
-func GetClientIP(req *http.Request) string {
-	var xff = req.Header.Get("X-Forwarded-For")
-	if xff != "" {
-		var parts = strings.SplitN(xff, ",", 2)
-		return strings.TrimSpace(parts[0])
-	}
-	var host string
-	var port string
-	if host, port, _ = net.SplitHostPort(req.RemoteAddr); port == "" {
-		return host
-	}
-	return host
-}
-
 func CheckIsSecure(r *http.Request) bool {
 	if r.TLS != nil {
 		return true
 	}
-	var proto string
-	if proto = r.Header.Get("X-Forwarded-Proto"); proto != "" {
-		return strings.Split(proto, ",")[0] == "https"
+	var protoRaw = r.Header["X-Forwarded-Proto"]
+	if len(protoRaw) != 0 {
+		return strings.Split(protoRaw[0], ",")[0] == "https"
 	}
 	return r.URL.Scheme == "https"
 }

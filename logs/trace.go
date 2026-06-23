@@ -3,28 +3,26 @@ package logs
 import (
 	"context"
 	"log/slog"
-)
 
-type TraceProvider interface {
-	GetTraceId(ctx context.Context) *string
-}
+	"github.com/KrainovSD/go-packages/traces"
+)
 
 type TraceHandlerOptions struct {
 	Handler       slog.Handler
-	TraceProvider TraceProvider
-	Key           *string
+	TraceProvider *traces.Provider
+	Key           string
 }
 
 type TraceHandler struct {
 	handler       slog.Handler
-	traceProvider TraceProvider
+	traceProvider *traces.Provider
 	key           string
 }
 
 func NewTraceHandler(opts *TraceHandlerOptions) *TraceHandler {
 	var key = "traceId"
-	if opts.Key != nil {
-		key = *opts.Key
+	if opts.Key != "" {
+		key = opts.Key
 	}
 	return &TraceHandler{handler: opts.Handler, traceProvider: opts.TraceProvider, key: key}
 }
@@ -34,7 +32,7 @@ func (h *TraceHandler) Enabled(ctx context.Context, level slog.Level) bool {
 }
 
 func (h *TraceHandler) Handle(ctx context.Context, r slog.Record) error {
-	var traceId = h.traceProvider.GetTraceId(ctx)
+	var traceId = h.traceProvider.GetTraceID(ctx)
 	if traceId != nil {
 		r.AddAttrs(slog.String(h.key, *traceId))
 	}

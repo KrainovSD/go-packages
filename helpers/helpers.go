@@ -136,6 +136,10 @@ func ParseEnvInt(env string) *int {
 	return &res
 }
 
+func ParseEnvBool(env string) bool {
+	return env == "true"
+}
+
 func TruncateString(str string, length int) string {
 	var r = []rune(str)
 	if len(r) <= length {
