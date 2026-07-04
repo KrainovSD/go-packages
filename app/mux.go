@@ -63,3 +63,11 @@ func (m *Mux) Handle(pattern string, handler http.Handler) {
 	}
 	m.mux.Handle(pattern, h)
 }
+
+func (m *Mux) HandleFunc(pattern string, handler func(http.ResponseWriter, *http.Request)) {
+	var h http.Handler = http.HandlerFunc(handler)
+	for i := len(m.middlewares) - 1; i >= 0; i-- {
+		h = m.middlewares[i](h)
+	}
+	m.mux.Handle(pattern, h)
+}

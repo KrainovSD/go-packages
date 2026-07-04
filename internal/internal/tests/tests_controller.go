@@ -23,7 +23,7 @@ func Register(o TestsControllerOptions) error {
 	var c = testsController{
 		s: o.S,
 	}
-	o.M.Handle("GET /api/v1/tests", http.HandlerFunc(c.Test))
+	o.M.HandleFunc("GET /api/v1/tests", c.Test)
 	o.TM.Handle("GET /api/v2/tests", http.HandlerFunc(c.Test2))
 	return nil
 }
