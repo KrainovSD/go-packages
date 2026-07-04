@@ -1,6 +1,7 @@
 package cradle
 
 import (
+	"context"
 	"log/slog"
 	"sync"
 
@@ -14,13 +15,14 @@ import (
 )
 
 type Cradle struct {
-	Api     *api.Client
-	Log     *slog.Logger
-	Conf    *config.Config
-	Traces  *traces.Provider
-	Metrics *metrics.Provider
-	Db      *pgxpool.Pool
-	Redis   redis.UniversalClient
-	Queue   *kafka.Producer
-	Wg      *sync.WaitGroup
+	Api            *api.Client
+	Log            *slog.Logger
+	Conf           *config.Config
+	Traces         *traces.Provider
+	Metrics        *metrics.Provider
+	Db             *pgxpool.Pool
+	Redis          redis.UniversalClient
+	Queue          *kafka.Producer
+	Wg             *sync.WaitGroup
+	ShutdownSignal context.Context
 }

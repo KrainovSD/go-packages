@@ -120,6 +120,10 @@ func (a *App) ShutdownWait() *sync.WaitGroup {
 	return a.wg
 }
 
+func (a *App) ShutdownSignal() context.Context {
+	return a.shutdownSignal
+}
+
 func (a *App) Mux() *GlobalMux {
 	return a.mux
 }

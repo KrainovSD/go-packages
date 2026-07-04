@@ -102,15 +102,16 @@ func main() {
 			return nil, err
 		}
 		var cradle = &cradle.Cradle{
-			Api:     fetch,
-			Log:     server.Logger,
-			Conf:    conf,
-			Traces:  server.Traces,
-			Metrics: server.Metrics,
-			Db:      db,
-			Redis:   red,
-			Queue:   kq,
-			Wg:      server.ShutdownWait(),
+			Api:            fetch,
+			Log:            server.Logger,
+			Conf:           conf,
+			Traces:         server.Traces,
+			Metrics:        server.Metrics,
+			Db:             db,
+			Redis:          red,
+			Queue:          kq,
+			Wg:             server.ShutdownWait(),
+			ShutdownSignal: server.ShutdownSignal(),
 		}
 		if err = router.InitRoutes(&router.RoutesOptions{
 			M:      server.Mux().FullMiddlewares(),
