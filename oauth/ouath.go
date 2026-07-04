@@ -17,7 +17,6 @@ import (
 )
 
 type Oauth struct {
-	m                  *http.ServeMux
 	redis              redis.UniversalClient
 	log                *slog.Logger
 	apiClient          *api.Client
@@ -86,7 +85,9 @@ func (o *OauthOptions) validate() error {
 	if o == nil {
 		return errors.New("oauthOptions pointer is nil")
 	}
-
+	if o.Log == nil {
+		return errors.New("log pointer is nil")
+	}
 	if o.CookieTimeKey == nil {
 		o.CookieTimeKey = &Cookie{
 			Prefix: "/",
