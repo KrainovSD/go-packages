@@ -51,13 +51,14 @@ func main() {
 			Pprof:           false,
 		},
 	})
-	var crad *cradle.Cradle = &cradle.Cradle{
-		Log:     server.Logger,
-		Conf:    conf,
-		Traces:  server.Traces,
-		Metrics: server.Metrics,
-		Wg:      server.ShutdownWait(),
-	}
+	server.Mux().ExtendMiddlewareGroup(
+		"full",
+		"test",
+		[]app.MuxMiddleware{
+			middlewares.NewAuth(middlewares.AuthOptions{Strict: true}),
+			middlewares.NewLogger(middlewares.LoggerOptions{Strict: true}),
+		},
+	)
 	server.Hooks().OnPreStartup(func(ctx context.Context) (func(ctx context.Context), error) {
 		var db *pgxpool.Pool
 		if db, err = storage.NewPostgres(ctx, &storage.PostgresOptions{Connection: conf.Default.Postgres.Connection, Tracing: server.Traces.Exist()}); err != nil {
@@ -100,37 +101,31 @@ func main() {
 		if fetch, err = api.NewClient(&api.ClientOptions{Tracing: server.Traces.Exist()}); err != nil {
 			return nil, err
 		}
-
-		crad.Api = fetch
-		crad.Db = db
-		crad.Redis = red
-		crad.Queue = kq
+		var cradle = &cradle.Cradle{
+			Api:     fetch,
+			Log:     server.Logger,
+			Conf:    conf,
+			Traces:  server.Traces,
+			Metrics: server.Metrics,
+			Db:      db,
+			Redis:   red,
+			Queue:   kq,
+			Wg:      server.ShutdownWait(),
+		}
+		if err = router.InitRoutes(&router.RoutesOptions{
+			M:      server.Mux().FullMiddlewares(),
+			SM:     server.Mux().BaseMiddlewares(),
+			TM:     server.Mux().WithMiddlewares("test"),
+			Cradle: cradle,
+		}); err != nil {
+			return nil, err
+		}
 		return func(ctx context.Context) {
 			db.Close()
 			kq.Close()
 			red.Close()
 			fetch.Close()
 		}, nil
-	})
-	server.Mux().ExtendMiddlewareGroup(
-		"full",
-		"test",
-		[]app.MuxMiddleware{
-			middlewares.NewAuth(middlewares.AuthOptions{Strict: true}),
-			middlewares.NewLogger(middlewares.LoggerOptions{Strict: true}),
-		},
-	)
-	server.Hooks().OnPreStartup(func(ctx context.Context) (func(ctx context.Context), error) {
-		err = router.InitRoutes(&router.RoutesOptions{
-			M:      server.Mux().FullMiddlewares(),
-			SM:     server.Mux().BaseMiddlewares(),
-			TM:     server.Mux().WithMiddlewares("test"),
-			Cradle: crad,
-		})
-		if err != nil {
-			return nil, err
-		}
-		return nil, nil
 	})
 	server.Hooks().OnPostStartup(func(ctx context.Context, wg *sync.WaitGroup) error {
 		fmt.Println("Server started on", conf.Default.System.Port)
