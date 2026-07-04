@@ -137,11 +137,11 @@ func (a *App) Start() {
 	var errChan = make(chan error, 1)
 	go func() {
 		var listener, err = net.Listen("tcp", a.server.Addr)
-		defer listener.Close()
 		if err != nil {
 			errChan <- err
 			return
 		}
+		defer listener.Close()
 		a.postStartup()
 		errChan <- a.server.Serve(listener)
 	}()
