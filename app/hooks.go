@@ -5,11 +5,11 @@ import (
 	"sync"
 )
 
-type hookOnPreStartup = func(ctx context.Context) (func(ctx context.Context), error)
-type hookOnPostStartup = func(ctx context.Context, wg *sync.WaitGroup) error
-type hookOnPreShutdown = func(ctx context.Context)
-type hookOnPostShutdown = func(ctx context.Context)
-type hooksCleanup = func(ctx context.Context)
+type hookOnPreStartup = func(startupCtx context.Context) (func(shutdownCtx context.Context), error)
+type hookOnPostStartup = func(shutdownSignal context.Context, wg *sync.WaitGroup) error
+type hookOnPreShutdown = func(shutdownCtx context.Context)
+type hookOnPostShutdown = func(shutdownCtx context.Context)
+type hooksCleanup = func(shutdownCtx context.Context)
 
 type Hooks struct {
 	cleanup        []hooksCleanup
@@ -29,28 +29,28 @@ func newHooks() *Hooks {
 	}
 }
 
-func (h *Hooks) OnPreStartup(handler func(ctx context.Context) (func(ctx context.Context), error)) {
+func (h *Hooks) OnPreStartup(handler func(startupCtx context.Context) (func(shutdownCtx context.Context), error)) {
 	if handler == nil {
 		return
 	}
 	h.onPreStartup = append(h.onPreStartup, handler)
 }
 
-func (h *Hooks) OnPostStartup(handler func(ctx context.Context, wg *sync.WaitGroup) error) {
+func (h *Hooks) OnPostStartup(handler func(shutdownSignal context.Context, wg *sync.WaitGroup) error) {
 	if handler == nil {
 		return
 	}
 	h.onPostStartup = append(h.onPostStartup, handler)
 }
 
-func (h *Hooks) OnPreShutdown(handler func(ctx context.Context)) {
+func (h *Hooks) OnPreShutdown(handler func(shutdownCtx context.Context)) {
 	if handler == nil {
 		return
 	}
 	h.onPreShutdown = append(h.onPreShutdown, handler)
 }
 
-func (h *Hooks) OnPostShutdown(handler func(ctx context.Context)) {
+func (h *Hooks) OnPostShutdown(handler func(shutdownCtx context.Context)) {
 	if handler == nil {
 		return
 	}

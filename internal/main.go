@@ -59,16 +59,16 @@ func main() {
 			middlewares.NewLogger(middlewares.LoggerOptions{Strict: true}),
 		},
 	)
-	server.Hooks().OnPreStartup(func(ctx context.Context) (func(ctx context.Context), error) {
+	server.Hooks().OnPreStartup(func(startupCtx context.Context) (func(shutdownCtx context.Context), error) {
 		var db *pgxpool.Pool
-		if db, err = storage.NewPostgres(ctx, &storage.PostgresOptions{Connection: conf.Default.Postgres.Connection, Tracing: server.Traces.Exist()}); err != nil {
+		if db, err = storage.NewPostgres(startupCtx, &storage.PostgresOptions{Connection: conf.Default.Postgres.Connection, Tracing: server.Traces.Exist()}); err != nil {
 			return nil, err
 		}
 		if err = pg.Init(db); err != nil {
 			return nil, err
 		}
 		var kq *kafka.Producer
-		if kq, err = queue.NewProducer(ctx, &queue.ProducerOptions{
+		if kq, err = queue.NewProducer(startupCtx, &queue.ProducerOptions{
 			Servers: conf.Default.Kafka.Servers,
 			SecurityOptions: queue.SecurityOptions{
 				SecurityProtocol: conf.Default.Kafka.SecurityProtocol,
@@ -85,7 +85,7 @@ func main() {
 			return nil, err
 		}
 		var red redis.UniversalClient
-		if red, err = storage.NewRedis(ctx, &storage.RedisOptions{
+		if red, err = storage.NewRedis(startupCtx, &storage.RedisOptions{
 			Addresses:  conf.Default.Redis.Addresses,
 			Username:   conf.Default.Redis.Username,
 			Password:   conf.Default.Redis.Password,
@@ -127,7 +127,7 @@ func main() {
 			fetch.Close()
 		}, nil
 	})
-	server.Hooks().OnPostStartup(func(ctx context.Context, wg *sync.WaitGroup) error {
+	server.Hooks().OnPostStartup(func(shutdownSignal context.Context, wg *sync.WaitGroup) error {
 		fmt.Println("Server started on", conf.Default.System.Port)
 		return nil
 	})

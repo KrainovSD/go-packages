@@ -19,16 +19,16 @@ import (
 )
 
 type App struct {
-	Logger            *slog.Logger
-	Traces            *traces.Provider
-	Metrics           *metrics.Provider
-	mux               *GlobalMux
-	hooks             *Hooks
-	server            *http.Server
-	config            *Config
-	wg                *sync.WaitGroup
-	shutdownCtx       context.Context
-	cancelShutdownCtx func()
+	Logger               *slog.Logger
+	Traces               *traces.Provider
+	Metrics              *metrics.Provider
+	mux                  *GlobalMux
+	hooks                *Hooks
+	server               *http.Server
+	config               *Config
+	wg                   *sync.WaitGroup
+	shutdownSignal       context.Context
+	cancelShutdownSignal func()
 }
 
 func New(config *Config) *App {
@@ -93,7 +93,7 @@ func New(config *Config) *App {
 	middlewares["full"] = []MuxMiddleware{writerMiddleware, tracesMiddleware, metricsMiddleware, loggerMiddleware, goalkeeperMiddleware}
 	var hooks = newHooks()
 	var mux = newMux(middlewares)
-	var shutdownCtx, cancelShutdownCtx = context.WithCancel(context.Background())
+	var shutdownSignal, cancelShutdownSignal = context.WithCancel(context.Background())
 	return &App{
 		Logger:  logger,
 		Traces:  traceProvider,
@@ -110,9 +110,9 @@ func New(config *Config) *App {
 			ReadHeaderTimeout: config.Server.ReadHeaderTimeout,
 			MaxHeaderBytes:    config.Server.MaxHeaderBytes,
 		},
-		wg:                &sync.WaitGroup{},
-		shutdownCtx:       shutdownCtx,
-		cancelShutdownCtx: cancelShutdownCtx,
+		wg:                   &sync.WaitGroup{},
+		shutdownSignal:       shutdownSignal,
+		cancelShutdownSignal: cancelShutdownSignal,
 	}
 }
 
@@ -156,14 +156,14 @@ func (a *App) Start() {
 	}
 
 	a.preShutdown()
-	var ctx, cancel = context.WithTimeout(context.Background(), a.config.ShutdownTimeout)
-	defer cancel()
+	var shutdownCtx, cancelShutdownCtx = context.WithTimeout(context.Background(), a.config.ShutdownTimeout)
+	defer cancelShutdownCtx()
 	var err error
-	if err = a.server.Shutdown(ctx); err != nil {
+	if err = a.server.Shutdown(shutdownCtx); err != nil {
 		a.Logger.Error("shutdown server failed", "error", err.Error())
 		a.server.Close()
 	}
-	a.cancelShutdownCtx()
+	a.cancelShutdownSignal()
 	a.wg.Wait()
 	var cleanup = a.hooks.cleanup
 	for _, clean := range cleanup {
@@ -176,8 +176,8 @@ func (a *App) Start() {
 
 func (a *App) preStartup() {
 	var err error
-	var startupCtx, stopStartupCtx = context.WithTimeout(context.Background(), a.config.StartupTimeout)
-	defer stopStartupCtx()
+	var startupCtx, cancelStartupCtx = context.WithTimeout(context.Background(), a.config.StartupTimeout)
+	defer cancelStartupCtx()
 	for _, fn := range a.hooks.onPreStartup {
 		var clean hooksCleanup
 		if clean, err = fn(startupCtx); err != nil {
@@ -192,7 +192,7 @@ func (a *App) preStartup() {
 func (a *App) postStartup() {
 	var err error
 	for _, fn := range a.hooks.onPostStartup {
-		if err = fn(a.shutdownCtx, a.wg); err != nil {
+		if err = fn(a.shutdownSignal, a.wg); err != nil {
 			panic(err)
 		}
 	}
@@ -200,16 +200,16 @@ func (a *App) postStartup() {
 
 func (a *App) preShutdown() {
 	for _, fn := range a.hooks.onPreShutdown {
-		var ctx, cancelCtx = context.WithTimeout(context.Background(), a.config.ShutdownTimeout)
-		fn(ctx)
-		cancelCtx()
+		var shutdownCtx, cancelShutdownCtx = context.WithTimeout(context.Background(), a.config.ShutdownTimeout)
+		fn(shutdownCtx)
+		cancelShutdownCtx()
 	}
 }
 
 func (a *App) postShutdown() {
 	for _, fn := range a.hooks.onPostShutdown {
-		var ctx, cancelCtx = context.WithTimeout(context.Background(), a.config.ShutdownTimeout)
-		fn(ctx)
-		cancelCtx()
+		var shutdownCtx, cancelShutdownCtx = context.WithTimeout(context.Background(), a.config.ShutdownTimeout)
+		fn(shutdownCtx)
+		cancelShutdownCtx()
 	}
 }
