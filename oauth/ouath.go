@@ -10,9 +10,9 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/KrainovSD/go-packages/api"
+	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -198,10 +198,10 @@ func (o *Oauth) redirectError(options redirectErrorOptions) {
 }
 
 type OauthProvider struct {
-	oauth        *Oauth
-	clientId     string
-	clientSecret string
-	issuer       string
+	oauth           *Oauth
+	clientId        string
+	clientSecret    string
+	idTokenVerifier *oidc.IDTokenVerifier
 	// oauth url
 	loginPath string
 	// oauth url
@@ -209,16 +209,15 @@ type OauthProvider struct {
 	// oauth url
 	userPath string
 	// oauth url
-	logoutPath       string
-	startAuthPath    string
-	callbackPath     string
-	clearPath        string
-	provider         string
-	parseUser        func(ctx context.Context, response []byte) (User, error)
-	parseToken       func(ctx context.Context, response []byte) (TokenInfo, error)
-	createSession    func(ctx context.Context, token TokenInfo, user User) (SessionToken, error)
-	scopes           []string
-	iatLeewaySeconds int
+	logoutPath    string
+	startAuthPath string
+	callbackPath  string
+	clearPath     string
+	provider      string
+	parseUser     func(ctx context.Context, response []byte) (User, error)
+	parseToken    func(ctx context.Context, response []byte) (TokenInfo, error)
+	createSession func(ctx context.Context, token TokenInfo, user User, verifiedIdToken *oidc.IDToken) (SessionToken, error)
+	scopes        []string
 }
 
 type OauthProviderOptions struct {
@@ -232,16 +231,19 @@ type OauthProviderOptions struct {
 	// oauth url
 	UserPath string
 	// oauth url
-	LogoutPath       string
-	StartAuthPath    string
-	CallbackPath     string
-	ClearPath        string
-	Provider         string
-	ParseUser        func(ctx context.Context, response []byte) (User, error)
-	ParseToken       func(ctx context.Context, response []byte) (TokenInfo, error)
-	CreateSession    func(ctx context.Context, token TokenInfo, user User) (SessionToken, error)
-	Scopes           []string
-	IatLeewaySeconds int
+	LogoutPath                 string
+	StartAuthPath              string
+	CallbackPath               string
+	ClearPath                  string
+	Provider                   string
+	ParseUser                  func(ctx context.Context, response []byte) (User, error)
+	ParseToken                 func(ctx context.Context, response []byte) (TokenInfo, error)
+	CreateSession              func(ctx context.Context, token TokenInfo, user User, verifiedIdToken *oidc.IDToken) (SessionToken, error)
+	Scopes                     []string
+	SkipClientIDCheck          bool
+	SkipExpiryCheck            bool
+	SkipIssuerCheck            bool
+	InsecureSkipSignatureCheck bool
 }
 
 func (o *Oauth) NewProvider(options *OauthProviderOptions) (*OauthProvider, error) {
@@ -252,7 +254,7 @@ func (o *Oauth) NewProvider(options *OauthProviderOptions) (*OauthProvider, erro
 		return provider, errors.New("oauth pointer is nil")
 	}
 
-	var issuer string
+	var idTokenVerifier *oidc.IDTokenVerifier
 	if options.OidcPath != "" {
 		var err error
 		var oidcConfig OidcConfig
@@ -269,7 +271,7 @@ func (o *Oauth) NewProvider(options *OauthProviderOptions) (*OauthProvider, erro
 			return provider, fmt.Errorf("unmarshal oauth config: %w", err)
 		}
 
-		issuer = oidcConfig.Issuer
+		var issuer = oidcConfig.Issuer
 		if oidcConfig.LogoutPath != "" && options.LogoutPath == "" {
 			options.LogoutPath = oidcConfig.LogoutPath
 		}
@@ -282,29 +284,38 @@ func (o *Oauth) NewProvider(options *OauthProviderOptions) (*OauthProvider, erro
 		if oidcConfig.TokenPath != "" && options.TokenPath == "" {
 			options.TokenPath = oidcConfig.TokenPath
 		}
+		if oidcConfig.JwksUri != "" {
+			var keySet oidc.KeySet = oidc.NewRemoteKeySet(context.Background(), oidcConfig.JwksUri)
+			idTokenVerifier = oidc.NewVerifier(issuer, keySet, &oidc.Config{
+				ClientID:                   options.ClientId,
+				SkipClientIDCheck:          options.SkipClientIDCheck,
+				SkipExpiryCheck:            options.SkipExpiryCheck,
+				SkipIssuerCheck:            options.SkipIssuerCheck,
+				InsecureSkipSignatureCheck: options.InsecureSkipSignatureCheck,
+			})
+		}
 	}
 	if err = options.validate(); err != nil {
 		return provider, fmt.Errorf("validate oauth provider: %w", err)
 	}
 
 	return &OauthProvider{
-		oauth:            o,
-		clientId:         options.ClientId,
-		clientSecret:     options.ClientSecret,
-		issuer:           issuer,
-		provider:         options.Provider,
-		loginPath:        options.LoginPath,
-		tokenPath:        options.TokenPath,
-		userPath:         options.UserPath,
-		logoutPath:       options.LogoutPath,
-		startAuthPath:    options.StartAuthPath,
-		callbackPath:     options.CallbackPath,
-		clearPath:        options.ClearPath,
-		parseUser:        options.ParseUser,
-		parseToken:       options.ParseToken,
-		createSession:    options.CreateSession,
-		scopes:           options.Scopes,
-		iatLeewaySeconds: options.IatLeewaySeconds,
+		oauth:           o,
+		clientId:        options.ClientId,
+		clientSecret:    options.ClientSecret,
+		idTokenVerifier: idTokenVerifier,
+		provider:        options.Provider,
+		loginPath:       options.LoginPath,
+		tokenPath:       options.TokenPath,
+		userPath:        options.UserPath,
+		logoutPath:      options.LogoutPath,
+		startAuthPath:   options.StartAuthPath,
+		callbackPath:    options.CallbackPath,
+		clearPath:       options.ClearPath,
+		parseUser:       options.ParseUser,
+		parseToken:      options.ParseToken,
+		createSession:   options.CreateSession,
+		scopes:          options.Scopes,
 	}, nil
 }
 
@@ -312,9 +323,6 @@ func (o *OauthProviderOptions) validate() error {
 
 	if o == nil {
 		return errors.New("oauthRegisterOptions pointer is nil")
-	}
-	if o.IatLeewaySeconds == 0 {
-		o.IatLeewaySeconds = 60
 	}
 	if o.ClientId == "" {
 		return errors.New("clientId is empty")
@@ -457,52 +465,14 @@ func (o *OauthProvider) getUser(ctx context.Context, token string, client *api.C
 	return user, nil
 }
 
-func (o *OauthProvider) oidcValidate(idToken string) error {
-	if idToken == "" {
-		return nil
+func (p *OauthProvider) verifyIdToken(ctx context.Context, rawIdToken string) (*oidc.IDToken, error) {
+	if p.idTokenVerifier == nil || rawIdToken == "" {
+		return nil, nil
 	}
-	var payload jwtPayload
+	var idToken *oidc.IDToken
 	var err error
-	if payload, err = decodeJWT(idToken); err != nil {
-		return fmt.Errorf("decode jwt: %w", err)
+	if idToken, err = p.idTokenVerifier.Verify(ctx, rawIdToken); err != nil {
+		return nil, fmt.Errorf("verify id token: %w", err)
 	}
-	var now = time.Now().Unix()
-	if o.issuer != "" && payload.Iss != o.issuer {
-		return fmt.Errorf("invalid issuer: got %q, want %q", payload.Iss, o.issuer)
-	}
-	if payload.Exp < now {
-		return fmt.Errorf("token is expired")
-	}
-	if payload.Iat > 0 && payload.Iat > now+int64(o.iatLeewaySeconds) {
-		return fmt.Errorf("token issued in the future: iat=%d, now=%d", payload.Iat, now)
-	}
-	var audMatch bool
-	for _, aud := range payload.Aud {
-		if safeCompare(aud, o.clientId) {
-			audMatch = true
-			break
-		}
-	}
-	if !audMatch {
-		return fmt.Errorf("bad client id")
-	}
-	return nil
-}
-
-func (o *OauthProvider) oidcFlowValidate(idToken string, nonce string) error {
-	var err error
-	if err = o.oidcValidate(idToken); err != nil {
-		return err
-	}
-	if idToken == "" {
-		return nil
-	}
-	var payload jwtPayload
-	if payload, err = decodeJWT(idToken); err != nil {
-		return fmt.Errorf("decode jwt: %w", err)
-	}
-	if !safeCompare(payload.Nonce, nonce) {
-		return fmt.Errorf("bad nonce")
-	}
-	return nil
+	return idToken, nil
 }

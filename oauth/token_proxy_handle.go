@@ -64,7 +64,7 @@ func (p *OauthProvider) TokenProxyHandle() func(w http.ResponseWriter, r *http.R
 		}
 
 		/** validate if OIDC protocol supported  */
-		if err = p.oidcValidate(tokenInfo.IdToken); err != nil {
+		if _, err = p.verifyIdToken(r.Context(), tokenInfo.IdToken); err != nil {
 			p.oauth.sendError(w, r, fmt.Errorf("validate oidc: %w", err), 0)
 			return
 		}
@@ -78,7 +78,7 @@ func (p *OauthProvider) TokenProxyHandle() func(w http.ResponseWriter, r *http.R
 
 		/** create session */
 		var sessionToken SessionToken
-		if sessionToken, err = p.createSession(r.Context(), tokenInfo, user); err != nil {
+		if sessionToken, err = p.createSession(r.Context(), tokenInfo, user, nil); err != nil {
 			p.oauth.sendError(w, r, fmt.Errorf("create session: %w", err), 0)
 			return
 		}

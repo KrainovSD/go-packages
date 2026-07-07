@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+
+	"github.com/coreos/go-oidc/v3/oidc"
 )
 
 func (p *OauthProvider) TokenHandle() func(w http.ResponseWriter, r *http.Request) {
@@ -37,7 +39,8 @@ func (p *OauthProvider) TokenHandle() func(w http.ResponseWriter, r *http.Reques
 				return
 			}
 			/** validate if OIDC protocol supported  */
-			if err = p.oidcValidate(tokenInfo.IdToken); err != nil {
+			var verifiedIdToken *oidc.IDToken
+			if verifiedIdToken, err = p.verifyIdToken(r.Context(), tokenInfo.IdToken); err != nil {
 				p.oauth.sendError(w, r, fmt.Errorf("validate id token: %w", err), 401)
 				return
 			}
@@ -50,14 +53,14 @@ func (p *OauthProvider) TokenHandle() func(w http.ResponseWriter, r *http.Reques
 				}
 			}
 			if p.createSession != nil {
-				if sessionToken, err = p.createSession(r.Context(), tokenInfo, user); err != nil {
+				if sessionToken, err = p.createSession(r.Context(), tokenInfo, user, verifiedIdToken); err != nil {
 					p.oauth.sendError(w, r, fmt.Errorf("create session: %w", err), 401)
 					return
 				}
-			} else if tokenInfo.IdToken != "" {
+			} else if verifiedIdToken != nil {
 				sessionToken = SessionToken{
 					Token:   tokenInfo.IdToken,
-					Expires: getIdTokenExpires(tokenInfo.IdToken, tokenInfo.ExpiresIn),
+					Expires: getIdTokenExpires(verifiedIdToken),
 				}
 			} else {
 				sessionToken = SessionToken{

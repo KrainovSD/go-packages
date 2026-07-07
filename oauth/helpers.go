@@ -8,7 +8,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -16,13 +15,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/redis/go-redis/v9"
 )
 
-func CreateSessionFromIdToken(tokenInfo TokenInfo, user User) (SessionToken, error) {
+func CreateSessionFromIdToken(tokenInfo TokenInfo, user User, verifiedIdToken *oidc.IDToken) (SessionToken, error) {
 	return SessionToken{
 		Token:   tokenInfo.IdToken,
-		Expires: getIdTokenExpires(tokenInfo.IdToken, tokenInfo.ExpiresIn),
+		Expires: getIdTokenExpires(verifiedIdToken),
 	}, nil
 }
 func CreateSessionFromAccessToken(tokenInfo TokenInfo, user User) (SessionToken, error) {
@@ -32,20 +32,8 @@ func CreateSessionFromAccessToken(tokenInfo TokenInfo, user User) (SessionToken,
 	}, nil
 }
 
-func getIdTokenExpires(token string, expires int) int {
-	var idExpires = expires
-	var parts = strings.Split(token, ".")
-	if len(parts) == 3 {
-		var err error
-		var payload []byte
-		if payload, err = base64.RawURLEncoding.DecodeString(parts[1]); err == nil {
-			var claims IdTokenClaim
-			if err = json.Unmarshal(payload, &claims); err == nil {
-				idExpires = claims.Exp - claims.Iat
-			}
-		}
-	}
-	return idExpires
+func getIdTokenExpires(token *oidc.IDToken) int {
+	return int(token.Expiry.Sub(token.IssuedAt).Seconds())
 }
 
 type StateStore struct {
@@ -80,48 +68,6 @@ func generateCodeChallenge(verifier string) string {
 
 func safeCompare(a string, b string) bool {
 	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
-}
-
-type audienceList []string
-
-func (a *audienceList) UnmarshalJSON(data []byte) error {
-	var single string
-	if err := json.Unmarshal(data, &single); err == nil {
-		*a = []string{single}
-		return nil
-	}
-	var multi []string
-	if err := json.Unmarshal(data, &multi); err != nil {
-		return err
-	}
-	*a = multi
-	return nil
-}
-
-type jwtPayload struct {
-	Iss   string       `json:"iss"`
-	Sub   string       `json:"sub"`
-	Aud   audienceList `json:"aud"`
-	Exp   int64        `json:"exp"`
-	Iat   int64        `json:"iat"`
-	Nonce string       `json:"nonce"`
-	Jti   string       `json:"jti"`
-}
-
-func decodeJWT(token string) (jwtPayload, error) {
-	var payload jwtPayload
-	var parts = strings.Split(token, ".")
-	if len(parts) != 3 {
-		return payload, errors.New("bad jwt format")
-	}
-	var payloadBytes, err = base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return payload, fmt.Errorf("error decoding payload: %w", err)
-	}
-	if err = json.Unmarshal(payloadBytes, &payload); err != nil {
-		return payload, fmt.Errorf("error parse payload: %w", err)
-	}
-	return payload, nil
 }
 
 type oauthState struct {

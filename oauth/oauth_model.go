@@ -36,6 +36,7 @@ type OidcConfig struct {
 	TokenPath  string `json:"token_endpoint"`
 	LoginPath  string `json:"authorization_endpoint"`
 	LogoutPath string `json:"end_session_endpoint"`
+	JwksUri    string `json:"jwks_uri"`
 }
 
 type OidcToken struct {

@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+
+	"github.com/coreos/go-oidc/v3/oidc"
 )
 
 func (p *OauthProvider) CallbackHandle() func(w http.ResponseWriter, r *http.Request) {
@@ -91,13 +93,24 @@ func (p *OauthProvider) CallbackHandle() func(w http.ResponseWriter, r *http.Req
 			return
 		}
 		/** validate if OIDC protocol supported  */
-		if err = p.oidcFlowValidate(tokenInfo.IdToken, fstate.Nonce); err != nil {
+		var verifiedIdToken *oidc.IDToken
+		if verifiedIdToken, err = p.verifyIdToken(r.Context(), tokenInfo.IdToken); err != nil {
 			p.oauth.redirectError(redirectErrorOptions{
 				w:             w,
 				r:             r,
 				frontendHost:  host,
 				frontendProto: proto,
 				err:           fmt.Errorf("validate oidc: %w", err),
+			})
+			return
+		}
+		if verifiedIdToken != nil && !safeCompare(verifiedIdToken.Nonce, fstate.Nonce) {
+			p.oauth.redirectError(redirectErrorOptions{
+				w:             w,
+				r:             r,
+				frontendHost:  host,
+				frontendProto: proto,
+				err:           fmt.Errorf("validate nonce, expected: %s, received: %s", fstate.Nonce, verifiedIdToken.Nonce),
 			})
 			return
 		}
@@ -119,7 +132,7 @@ func (p *OauthProvider) CallbackHandle() func(w http.ResponseWriter, r *http.Req
 		/** create session */
 		var sessionToken SessionToken
 		if p.createSession != nil {
-			if sessionToken, err = p.createSession(r.Context(), tokenInfo, user); err != nil {
+			if sessionToken, err = p.createSession(r.Context(), tokenInfo, user, verifiedIdToken); err != nil {
 				p.oauth.redirectError(redirectErrorOptions{
 					w:             w,
 					r:             r,
@@ -129,10 +142,10 @@ func (p *OauthProvider) CallbackHandle() func(w http.ResponseWriter, r *http.Req
 				})
 				return
 			}
-		} else if tokenInfo.IdToken != "" {
+		} else if verifiedIdToken != nil {
 			sessionToken = SessionToken{
 				Token:   tokenInfo.IdToken,
-				Expires: getIdTokenExpires(tokenInfo.IdToken, tokenInfo.ExpiresIn),
+				Expires: getIdTokenExpires(verifiedIdToken),
 			}
 		} else {
 			sessionToken = SessionToken{
