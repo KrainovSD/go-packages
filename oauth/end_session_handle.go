@@ -29,6 +29,7 @@ func (o *Oauth) EndSessionHandle() func(w http.ResponseWriter, r *http.Request) 
 			}
 			o.clearCookies(w, frontendProto)
 			http.Redirect(w, r, comebackUrl, http.StatusTemporaryRedirect)
+			return
 		}
 
 		if o.handlers.EndSession == nil {

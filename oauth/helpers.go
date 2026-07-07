@@ -26,6 +26,9 @@ func CreateSessionFromAccessToken(tokenInfo TokenInfo, user User) (SessionToken,
 }
 
 func getIdTokenExpires(token *oidc.IDToken) int {
+	if token == nil {
+		return 0
+	}
 	return int(token.Expiry.Sub(token.IssuedAt).Seconds())
 }
 
