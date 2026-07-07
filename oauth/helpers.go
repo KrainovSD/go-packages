@@ -1,19 +1,15 @@
 package oauth
 
 import (
-	"context"
 	"crypto/subtle"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
-	"time"
 
 	"golang.org/x/oauth2"
 
 	"github.com/KrainovSD/go-packages/helpers"
 	"github.com/coreos/go-oidc/v3/oidc"
-	"github.com/redis/go-redis/v9"
 )
 
 func CreateSessionFromIdToken(tokenInfo TokenInfo, user User, verifiedIdToken *oidc.IDToken) (SessionToken, error) {
@@ -67,48 +63,6 @@ func newOauthState(opts oauthStateOptions) (oauthState, string, error) {
 	}, timeKey, nil
 }
 
-func setLogoutState(ctx context.Context, logoutState logoutState, key string, serviceDataExpires int, redisClient redis.UniversalClient) error {
-	var logoutStateBytes []byte
-	var err error
-	if logoutStateBytes, err = json.Marshal(logoutState); err != nil {
-		return fmt.Errorf("marshal logout state: %w", err)
-	}
-	if redisClient == nil {
-		stateStore.Set(key, string(logoutStateBytes))
-	} else {
-		var cmd = redisClient.Set(ctx, key, string(logoutStateBytes), time.Duration(serviceDataExpires)*time.Second)
-		if err = cmd.Err(); err != nil {
-			return fmt.Errorf("set logout state in redis: %w", err)
-		}
-	}
-	return nil
-}
-
-func getLogoutState(ctx context.Context, key string, redisClient redis.UniversalClient) (logoutState, error) {
-	var state logoutState
-	if key == "" {
-		return state, fmt.Errorf("empty key")
-	}
-	var err error
-	var stateStr string
-	if redisClient == nil {
-		stateStr = stateStore.Get(key)
-	} else {
-		var cmd = redisClient.Get(ctx, key)
-		if stateStr, err = cmd.Result(); err != nil {
-			return state, fmt.Errorf("get logout state from redis: %w", err)
-		}
-		redisClient.Del(ctx, key)
-	}
-
-	if err = json.Unmarshal([]byte(stateStr), &state); err != nil {
-		return state, fmt.Errorf("parse logout state: %w", err)
-
-	}
-
-	return state, nil
-}
-
 type authUrlOptions struct {
 	Url           string
 	Nonce         string
@@ -155,11 +109,9 @@ func generateFallbackLogoutUrl(proto string, host string, startAuthPath string, 
 func generateClearUrl(proto string, host string, clearPath string) (string, error) {
 	var clearUrl *url.URL
 	var err error
-
 	if clearUrl, err = url.Parse(proto + "://" + host + clearPath); err != nil {
 		return "", fmt.Errorf("parse base url: %w", err)
 	}
-
 	return clearUrl.String(), nil
 }
 

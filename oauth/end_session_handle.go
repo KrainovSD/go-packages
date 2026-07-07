@@ -12,59 +12,43 @@ func (o *Oauth) EndSessionHandle() func(w http.ResponseWriter, r *http.Request) 
 		var err error
 		var frontendProto = getProto(r, o.frontend.Protocol)
 		var frontendHost = getHost(r, o.frontend.Host)
-		var comebackUrl string
-		var clearPath = o.routing.ClearPath
-		if o.handlers.EndSession != nil {
-			clearPath = o.frontend.ClearRedirectPath
-		}
-		if comebackUrl, err = generateClearUrl(frontendProto, frontendHost, clearPath); err != nil {
+		var redirectWithError = func(err error) {
 			o.redirectError(redirectErrorOptions{
 				w:             w,
 				r:             r,
 				frontendHost:  frontendHost,
 				frontendProto: frontendProto,
-				err:           fmt.Errorf("generate clear url: %w", err),
+				err:           err,
 			})
-			return
+		}
+		if o.endSessionURL == "" {
+			var comebackUrl string
+			if comebackUrl, err = generateClearUrl(frontendProto, frontendHost, o.frontend.ClearPath); err != nil {
+				redirectWithError(fmt.Errorf("new clear url: %w", err))
+				return
+			}
+			o.clearCookies(w, frontendProto)
+			http.Redirect(w, r, comebackUrl, http.StatusTemporaryRedirect)
 		}
 
 		if o.handlers.EndSession == nil {
+			var comebackUrl string
+			if comebackUrl, err = generateClearUrl(frontendProto, frontendHost, o.routing.ClearPath); err != nil {
+				redirectWithError(fmt.Errorf("new clear url: %w", err))
+				return
+			}
 			var fallbackUrl string
-			if fallbackUrl, err = generateFallbackLogoutUrl(frontendProto, frontendHost, o.routing.AuthPath, o.frontend.LogoutRedirectPath); err != nil {
-				o.redirectError(redirectErrorOptions{
-					w:             w,
-					r:             r,
-					frontendHost:  frontendHost,
-					frontendProto: frontendProto,
-					err:           fmt.Errorf("generate fallback url: %w", err),
-				})
+			if fallbackUrl, err = generateFallbackLogoutUrl(frontendProto, frontendHost, o.routing.AuthPath, o.frontend.LogoutPath); err != nil {
+				redirectWithError(fmt.Errorf("new fallback url: %w", err))
 				return
 			}
 			var timeKey string
 			if timeKey, err = helpers.RandomHex(32); err != nil {
-				o.redirectError(redirectErrorOptions{
-					w:             w,
-					r:             r,
-					frontendHost:  frontendHost,
-					frontendProto: frontendProto,
-					err:           fmt.Errorf("generate time key: %w", err),
-				})
+				redirectWithError(fmt.Errorf("new time key: %w", err))
 				return
 			}
-			if err = setLogoutState(
-				r.Context(),
-				logoutState{Host: frontendHost, Proto: frontendProto},
-				timeKey,
-				o.settings.ServiceDataExpiresIn,
-				o.redis,
-			); err != nil {
-				o.redirectError(redirectErrorOptions{
-					w:             w,
-					r:             r,
-					frontendHost:  frontendHost,
-					frontendProto: frontendProto,
-					err:           fmt.Errorf("generate time key: %w", err),
-				})
+			if err = o.setLogoutState(r.Context(), logoutState{Host: frontendHost, Proto: frontendProto}, timeKey); err != nil {
+				redirectWithError(fmt.Errorf("set logout state: %w", err))
 				return
 			}
 			http.SetCookie(w, &http.Cookie{
@@ -75,8 +59,8 @@ func (o *Oauth) EndSessionHandle() func(w http.ResponseWriter, r *http.Request) 
 				HttpOnly: true,
 				Secure:   frontendProto == "https",
 			})
-			var tokenId string
-			if tokenId, err = o.extractToken(r, o.cookieSessionToken); err != nil {
+			var token string
+			if token, err = o.extractToken(r, o.cookieSessionToken); err != nil {
 				// use fallback url for re-auth and set token id to cookie
 				o.redirectError(redirectErrorOptions{
 					w:           w,
@@ -87,40 +71,22 @@ func (o *Oauth) EndSessionHandle() func(w http.ResponseWriter, r *http.Request) 
 				return
 			}
 			var logoutUrl string
-			if logoutUrl, err = generateLogoutUrl(o.endSessionURL, comebackUrl, tokenId, o.provider.ClientID); err != nil {
-				o.redirectError(redirectErrorOptions{
-					w:             w,
-					r:             r,
-					frontendHost:  frontendHost,
-					frontendProto: frontendProto,
-					err:           fmt.Errorf("generate logout url: %w", err),
-				})
+			if logoutUrl, err = generateLogoutUrl(o.endSessionURL, comebackUrl, token, o.provider.ClientID); err != nil {
+				redirectWithError(fmt.Errorf("new logout url: %w", err))
 				return
 			}
 			http.Redirect(w, r, logoutUrl, http.StatusTemporaryRedirect)
 		} else {
-			var token string
-			if token, err = o.extractToken(r, o.cookieSessionToken); err != nil {
-				o.redirectError(redirectErrorOptions{
-					w:             w,
-					r:             r,
-					frontendProto: frontendProto,
-					frontendHost:  frontendHost,
-					err:           fmt.Errorf("no token found: %w", err),
-				})
+			var comebackUrl string
+			if comebackUrl, err = generateClearUrl(frontendProto, frontendHost, o.frontend.ClearPath); err != nil {
+				redirectWithError(fmt.Errorf("new clear url: %w", err))
 				return
 			}
+			var token, _ = o.extractToken(r, o.cookieSessionToken)
 			if err = o.handlers.EndSession(r.Context(), token, o.endSessionURL); err != nil {
-				o.redirectError(redirectErrorOptions{
-					w:             w,
-					r:             r,
-					frontendProto: frontendProto,
-					frontendHost:  frontendHost,
-					err:           fmt.Errorf("logout execute: %w", err),
-				})
-				return
+				redirectWithError(fmt.Errorf("process end session: %w", err))
 			}
-			o.clearTokens(w, frontendProto)
+			o.clearCookies(w, frontendProto)
 			http.Redirect(w, r, comebackUrl, http.StatusTemporaryRedirect)
 		}
 	}

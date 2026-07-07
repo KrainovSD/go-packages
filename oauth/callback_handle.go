@@ -1,6 +1,7 @@
 package oauth
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -43,6 +44,15 @@ func (o *Oauth) CallbackHandle() func(w http.ResponseWriter, r *http.Request) {
 		}
 		var proto = comebackUrl.Scheme
 		var host = comebackUrl.Host
+		var redirectWithError = func(err error) {
+			o.redirectError(redirectErrorOptions{
+				w:             w,
+				r:             r,
+				frontendHost:  host,
+				frontendProto: proto,
+				err:           err,
+			})
+		}
 		http.SetCookie(w, &http.Cookie{
 			Name:     o.cookieTimeKey.Name,
 			Value:    "",
@@ -52,70 +62,34 @@ func (o *Oauth) CallbackHandle() func(w http.ResponseWriter, r *http.Request) {
 			Secure:   proto == "https",
 		})
 		if !safeCompare(oauthState.State, state) {
-			o.redirectError(redirectErrorOptions{
-				w:             w,
-				r:             r,
-				frontendHost:  host,
-				frontendProto: proto,
-				err:           fmt.Errorf("the state is not the same"),
-			})
+			redirectWithError(errors.New("the state is not the same"))
 			return
 		}
 		var tokenInfo TokenInfo
 		if tokenInfo, err = o.exchangeToken(r.Context(), code, oauthState.CodeVerifier, oauthState.CallbackUrl); err != nil {
-			o.redirectError(redirectErrorOptions{
-				w:             w,
-				r:             r,
-				frontendHost:  host,
-				frontendProto: proto,
-				err:           fmt.Errorf("get token: %w", err),
-			})
+			redirectWithError(fmt.Errorf("get token: %w", err))
 			return
 		}
 		var verifiedIdToken *oidc.IDToken
 		if verifiedIdToken, err = o.verifyIdToken(r.Context(), tokenInfo.IdToken); err != nil {
-			o.redirectError(redirectErrorOptions{
-				w:             w,
-				r:             r,
-				frontendHost:  host,
-				frontendProto: proto,
-				err:           fmt.Errorf("validate oidc: %w", err),
-			})
+			redirectWithError(fmt.Errorf("verify id token: %w", err))
 			return
 		}
 		if verifiedIdToken != nil && !safeCompare(verifiedIdToken.Nonce, oauthState.Nonce) {
-			o.redirectError(redirectErrorOptions{
-				w:             w,
-				r:             r,
-				frontendHost:  host,
-				frontendProto: proto,
-				err:           fmt.Errorf("validate nonce, expected: %s, received: %s", oauthState.Nonce, verifiedIdToken.Nonce),
-			})
+			redirectWithError(fmt.Errorf("validate nonce, expected: %s, received: %s", oauthState.Nonce, verifiedIdToken.Nonce))
 			return
 		}
 		var user User
 		if o.handlers.ParseUser != nil {
 			if user, err = o.getUser(r.Context(), tokenInfo.AccessToken); err != nil {
-				o.redirectError(redirectErrorOptions{
-					w:             w,
-					r:             r,
-					frontendHost:  host,
-					frontendProto: proto,
-					err:           fmt.Errorf("get user: %w", err),
-				})
+				redirectWithError(fmt.Errorf("get user: %w", err))
 				return
 			}
 		}
 		var sessionToken SessionToken
 		if o.handlers.CreateSession != nil {
 			if sessionToken, err = o.handlers.CreateSession(r.Context(), tokenInfo, user, verifiedIdToken); err != nil {
-				o.redirectError(redirectErrorOptions{
-					w:             w,
-					r:             r,
-					frontendHost:  host,
-					frontendProto: proto,
-					err:           fmt.Errorf("create session: %w", err),
-				})
+				redirectWithError(fmt.Errorf("create session: %w", err))
 				return
 			}
 		} else if verifiedIdToken != nil {
@@ -144,7 +118,6 @@ func (o *Oauth) CallbackHandle() func(w http.ResponseWriter, r *http.Request) {
 				o.log.Warn("not found refresh token or expires in", "refreshToken", tokenInfo.RefreshToken == "", "expiresIn", tokenInfo.RefreshTokenExpiresIn == 0)
 			}
 		}
-
 		if o.cookieSessionToken != nil {
 			http.SetCookie(w, &http.Cookie{
 				Name:     o.cookieSessionToken.Name,
@@ -155,11 +128,9 @@ func (o *Oauth) CallbackHandle() func(w http.ResponseWriter, r *http.Request) {
 				Secure:   proto == "https",
 			})
 		}
-
-		comebackQuery := comebackUrl.Query()
+		var comebackQuery = comebackUrl.Query()
 		comebackQuery.Set(o.frontend.ExpiresQuery, strconv.Itoa(sessionToken.Expires))
 		comebackUrl.RawQuery = comebackQuery.Encode()
 		http.Redirect(w, r, comebackUrl.String(), http.StatusTemporaryRedirect)
-
 	}
 }

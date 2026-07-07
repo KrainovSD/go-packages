@@ -18,24 +18,24 @@ import (
 )
 
 type OauthFrontend struct {
-	ClearRedirectPath  string
-	ErrorRedirectPath  string
-	LogoutRedirectPath string
-	Host               string
-	Protocol           string
-	ExpiresQuery       string
+	ClearPath    string
+	ErrorPath    string
+	LogoutPath   string
+	Host         string
+	Protocol     string
+	ExpiresQuery string
 }
 
 func (of *OauthFrontend) newDefault() *OauthFrontend {
 	var o = *of
-	if o.ClearRedirectPath == "" {
-		o.ClearRedirectPath = "/clear"
+	if o.ClearPath == "" {
+		o.ClearPath = "/clear"
 	}
-	if o.ErrorRedirectPath == "" {
-		o.ErrorRedirectPath = "/error"
+	if o.ErrorPath == "" {
+		o.ErrorPath = "/error"
 	}
-	if o.LogoutRedirectPath == "" {
-		o.LogoutRedirectPath = "/logout"
+	if o.LogoutPath == "" {
+		o.LogoutPath = "/logout"
 	}
 	if o.ExpiresQuery == "" {
 		o.ExpiresQuery = "session_token_expires"
@@ -339,9 +339,9 @@ func (o *Oauth) redirectError(options redirectErrorOptions) {
 	var comebackUrl = options.comebackUrl
 	if comebackUrl == "" {
 		if frontendProto != "" && frontendHost != "" {
-			comebackUrl = frontendProto + "://" + frontendHost + o.frontend.ErrorRedirectPath
+			comebackUrl = frontendProto + "://" + frontendHost + o.frontend.ErrorPath
 		} else {
-			comebackUrl = o.frontend.ErrorRedirectPath
+			comebackUrl = o.frontend.ErrorPath
 		}
 	}
 	http.Redirect(options.w, options.r, comebackUrl, http.StatusTemporaryRedirect)
@@ -385,6 +385,46 @@ func (o *Oauth) getOauthState(ctx context.Context, key string) (oauthState, erro
 
 	}
 	return oauthState, nil
+}
+
+func (o *Oauth) setLogoutState(ctx context.Context, logoutState logoutState, key string) error {
+	var logoutStateBytes []byte
+	var err error
+	if logoutStateBytes, err = json.Marshal(logoutState); err != nil {
+		return fmt.Errorf("marshal logout state: %w", err)
+	}
+	if o.redis == nil {
+		stateStore.Set(key, string(logoutStateBytes))
+	} else {
+		var cmd = o.redis.Set(ctx, key, string(logoutStateBytes), time.Duration(o.settings.ServiceDataExpiresIn)*time.Second)
+		if err = cmd.Err(); err != nil {
+			return fmt.Errorf("set logout state in redis: %w", err)
+		}
+	}
+	return nil
+}
+
+func (o *Oauth) getLogoutState(ctx context.Context, key string) (logoutState, error) {
+	var state logoutState
+	if key == "" {
+		return state, fmt.Errorf("empty key")
+	}
+	var err error
+	var stateStr string
+	if o.redis == nil {
+		stateStr = stateStore.Get(key)
+	} else {
+		var cmd = o.redis.Get(ctx, key)
+		if stateStr, err = cmd.Result(); err != nil {
+			return state, fmt.Errorf("get logout state from redis: %w", err)
+		}
+		o.redis.Del(ctx, key)
+	}
+	if err = json.Unmarshal([]byte(stateStr), &state); err != nil {
+		return state, fmt.Errorf("parse logout state: %w", err)
+
+	}
+	return state, nil
 }
 
 func (o *Oauth) exchangeTokenByRefresh(ctx context.Context, refreshToken string) (TokenInfo, error) {
@@ -480,7 +520,7 @@ func (o *Oauth) verifyIdToken(ctx context.Context, rawIdToken string) (*oidc.IDT
 	return idToken, nil
 }
 
-func (o *Oauth) clearTokens(w http.ResponseWriter, protocol string) {
+func (o *Oauth) clearCookies(w http.ResponseWriter, protocol string) {
 	if o.cookieTimeKey != nil {
 		http.SetCookie(w, &http.Cookie{
 			Name:     o.cookieTimeKey.Name,
