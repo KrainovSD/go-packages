@@ -5,15 +5,15 @@ import (
 	"net/http"
 )
 
-func (p *OauthProvider) ClearHandle() func(w http.ResponseWriter, r *http.Request) {
+func (o *Oauth) ClearHandle() func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var err error
 		/** extract logout state */
 		var timeKey string
-		if p.oauth.cookieTimeKey != nil {
+		if o.cookieTimeKey != nil {
 			var timeKeyCookie *http.Cookie
-			if timeKeyCookie, err = r.Cookie(p.oauth.cookieTimeKey.Name); err != nil {
-				p.oauth.redirectError(redirectErrorOptions{
+			if timeKeyCookie, err = r.Cookie(o.cookieTimeKey.Name); err != nil {
+				o.redirectError(redirectErrorOptions{
 					w:   w,
 					r:   r,
 					err: fmt.Errorf("get time key: %w", err),
@@ -23,41 +23,40 @@ func (p *OauthProvider) ClearHandle() func(w http.ResponseWriter, r *http.Reques
 			timeKey = timeKeyCookie.Value
 		}
 		var state logoutState
-		if state, err = getLogoutState(r.Context(), timeKey, p.oauth.redis); err != nil {
-			p.oauth.redirectError(redirectErrorOptions{
+		if state, err = getLogoutState(r.Context(), timeKey, o.redis); err != nil {
+			o.redirectError(redirectErrorOptions{
 				w:   w,
 				r:   r,
 				err: fmt.Errorf("get logout state: %w", err),
 			})
 			return
 		}
-		var comebackUrl = state.Proto + "://" + state.Host + p.oauth.frontendClearPath
-
-		if p.oauth.cookieTimeKey != nil {
+		var comebackUrl = state.Proto + "://" + state.Host + o.frontend.ClearRedirectPath
+		if o.cookieTimeKey != nil {
 			http.SetCookie(w, &http.Cookie{
-				Name:     p.oauth.cookieTimeKey.Name,
+				Name:     o.cookieTimeKey.Name,
 				Value:    "",
-				Path:     p.oauth.cookieTimeKey.Prefix,
+				Path:     o.cookieTimeKey.Prefix,
 				MaxAge:   -1,
 				HttpOnly: true,
 				Secure:   state.Proto == "https",
 			})
 		}
-		if p.oauth.cookieRefreshToken != nil {
+		if o.cookieRefreshToken != nil {
 			http.SetCookie(w, &http.Cookie{
-				Name:     p.oauth.cookieRefreshToken.Name,
+				Name:     o.cookieRefreshToken.Name,
 				Value:    "",
-				Path:     p.oauth.cookieRefreshToken.Prefix,
+				Path:     o.cookieRefreshToken.Prefix,
 				MaxAge:   -1,
 				HttpOnly: true,
 				Secure:   state.Proto == "https",
 			})
 		}
-		if p.oauth.cookieSessionToken != nil {
+		if o.cookieSessionToken != nil {
 			http.SetCookie(w, &http.Cookie{
-				Name:     p.oauth.cookieSessionToken.Name,
+				Name:     o.cookieSessionToken.Name,
 				Value:    "",
-				Path:     p.oauth.cookieSessionToken.Prefix,
+				Path:     o.cookieSessionToken.Prefix,
 				MaxAge:   -1,
 				HttpOnly: true,
 				Secure:   state.Proto == "https",

@@ -9,14 +9,14 @@ import (
 	"github.com/coreos/go-oidc/v3/oidc"
 )
 
-func (p *OauthProvider) CallbackHandle() func(w http.ResponseWriter, r *http.Request) {
+func (o *Oauth) CallbackHandle() func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var err error
 		var code = r.URL.Query().Get("code")
 		var state = r.URL.Query().Get("state")
 		var timeKeyCookie *http.Cookie
-		if timeKeyCookie, err = r.Cookie(p.oauth.cookieTimeKey.Name); err != nil {
-			p.oauth.redirectError(redirectErrorOptions{
+		if timeKeyCookie, err = r.Cookie(o.cookieTimeKey.Name); err != nil {
+			o.redirectError(redirectErrorOptions{
 				w:   w,
 				r:   r,
 				err: fmt.Errorf("get time key: %w", err),
@@ -24,8 +24,8 @@ func (p *OauthProvider) CallbackHandle() func(w http.ResponseWriter, r *http.Req
 			return
 		}
 		var oauthState oauthState
-		if oauthState, err = p.oauth.getOauthState(r.Context(), timeKeyCookie.Value); err != nil {
-			p.oauth.redirectError(redirectErrorOptions{
+		if oauthState, err = o.getOauthState(r.Context(), timeKeyCookie.Value); err != nil {
+			o.redirectError(redirectErrorOptions{
 				w:   w,
 				r:   r,
 				err: fmt.Errorf("get flow state: %w", err),
@@ -34,7 +34,7 @@ func (p *OauthProvider) CallbackHandle() func(w http.ResponseWriter, r *http.Req
 		}
 		var comebackUrl *url.URL
 		if comebackUrl, err = url.Parse(oauthState.ComebackUrl); err != nil {
-			p.oauth.redirectError(redirectErrorOptions{
+			o.redirectError(redirectErrorOptions{
 				w:   w,
 				r:   r,
 				err: fmt.Errorf("get comeback url: %w", err),
@@ -44,15 +44,15 @@ func (p *OauthProvider) CallbackHandle() func(w http.ResponseWriter, r *http.Req
 		var proto = comebackUrl.Scheme
 		var host = comebackUrl.Host
 		http.SetCookie(w, &http.Cookie{
-			Name:     p.oauth.cookieTimeKey.Name,
+			Name:     o.cookieTimeKey.Name,
 			Value:    "",
-			Path:     p.oauth.cookieTimeKey.Prefix,
+			Path:     o.cookieTimeKey.Prefix,
 			MaxAge:   -1,
 			HttpOnly: true,
 			Secure:   proto == "https",
 		})
 		if !safeCompare(oauthState.State, state) {
-			p.oauth.redirectError(redirectErrorOptions{
+			o.redirectError(redirectErrorOptions{
 				w:             w,
 				r:             r,
 				frontendHost:  host,
@@ -62,8 +62,8 @@ func (p *OauthProvider) CallbackHandle() func(w http.ResponseWriter, r *http.Req
 			return
 		}
 		var tokenInfo TokenInfo
-		if tokenInfo, err = p.exchangeToken(r.Context(), code, oauthState.CodeVerifier, oauthState.CallbackUrl); err != nil {
-			p.oauth.redirectError(redirectErrorOptions{
+		if tokenInfo, err = o.exchangeToken(r.Context(), code, oauthState.CodeVerifier, oauthState.CallbackUrl); err != nil {
+			o.redirectError(redirectErrorOptions{
 				w:             w,
 				r:             r,
 				frontendHost:  host,
@@ -73,8 +73,8 @@ func (p *OauthProvider) CallbackHandle() func(w http.ResponseWriter, r *http.Req
 			return
 		}
 		var verifiedIdToken *oidc.IDToken
-		if verifiedIdToken, err = p.verifyIdToken(r.Context(), tokenInfo.IdToken); err != nil {
-			p.oauth.redirectError(redirectErrorOptions{
+		if verifiedIdToken, err = o.verifyIdToken(r.Context(), tokenInfo.IdToken); err != nil {
+			o.redirectError(redirectErrorOptions{
 				w:             w,
 				r:             r,
 				frontendHost:  host,
@@ -84,7 +84,7 @@ func (p *OauthProvider) CallbackHandle() func(w http.ResponseWriter, r *http.Req
 			return
 		}
 		if verifiedIdToken != nil && !safeCompare(verifiedIdToken.Nonce, oauthState.Nonce) {
-			p.oauth.redirectError(redirectErrorOptions{
+			o.redirectError(redirectErrorOptions{
 				w:             w,
 				r:             r,
 				frontendHost:  host,
@@ -94,9 +94,9 @@ func (p *OauthProvider) CallbackHandle() func(w http.ResponseWriter, r *http.Req
 			return
 		}
 		var user User
-		if p.parseUser != nil {
-			if user, err = p.getUser(r.Context(), tokenInfo.AccessToken, p.oauth.apiClient); err != nil {
-				p.oauth.redirectError(redirectErrorOptions{
+		if o.handlers.ParseUser != nil {
+			if user, err = o.getUser(r.Context(), tokenInfo.AccessToken); err != nil {
+				o.redirectError(redirectErrorOptions{
 					w:             w,
 					r:             r,
 					frontendHost:  host,
@@ -107,9 +107,9 @@ func (p *OauthProvider) CallbackHandle() func(w http.ResponseWriter, r *http.Req
 			}
 		}
 		var sessionToken SessionToken
-		if p.createSession != nil {
-			if sessionToken, err = p.createSession(r.Context(), tokenInfo, user, verifiedIdToken); err != nil {
-				p.oauth.redirectError(redirectErrorOptions{
+		if o.handlers.CreateSession != nil {
+			if sessionToken, err = o.handlers.CreateSession(r.Context(), tokenInfo, user, verifiedIdToken); err != nil {
+				o.redirectError(redirectErrorOptions{
 					w:             w,
 					r:             r,
 					frontendHost:  host,
@@ -130,26 +130,26 @@ func (p *OauthProvider) CallbackHandle() func(w http.ResponseWriter, r *http.Req
 			}
 		}
 
-		if p.oauth.cookieRefreshToken != nil {
+		if o.cookieRefreshToken != nil {
 			if tokenInfo.RefreshToken != "" && tokenInfo.RefreshTokenExpiresIn != 0 {
 				http.SetCookie(w, &http.Cookie{
-					Name:     p.oauth.cookieRefreshToken.Name,
+					Name:     o.cookieRefreshToken.Name,
 					Value:    tokenInfo.RefreshToken,
-					Path:     p.oauth.cookieRefreshToken.Prefix,
+					Path:     o.cookieRefreshToken.Prefix,
 					MaxAge:   tokenInfo.RefreshTokenExpiresIn,
 					HttpOnly: true,
 					Secure:   proto == "https",
 				})
 			} else {
-				p.oauth.log.Warn("not found refresh token or expires in", "refreshToken", tokenInfo.RefreshToken == "", "expiresIn", tokenInfo.RefreshTokenExpiresIn == 0)
+				o.log.Warn("not found refresh token or expires in", "refreshToken", tokenInfo.RefreshToken == "", "expiresIn", tokenInfo.RefreshTokenExpiresIn == 0)
 			}
 		}
 
-		if p.oauth.cookieSessionToken != nil {
+		if o.cookieSessionToken != nil {
 			http.SetCookie(w, &http.Cookie{
-				Name:     p.oauth.cookieSessionToken.Name,
+				Name:     o.cookieSessionToken.Name,
 				Value:    sessionToken.Token,
-				Path:     p.oauth.cookieSessionToken.Prefix,
+				Path:     o.cookieSessionToken.Prefix,
 				MaxAge:   sessionToken.Expires,
 				HttpOnly: true,
 				Secure:   proto == "https",
@@ -157,7 +157,7 @@ func (p *OauthProvider) CallbackHandle() func(w http.ResponseWriter, r *http.Req
 		}
 
 		comebackQuery := comebackUrl.Query()
-		comebackQuery.Set(p.oauth.queryExpires, strconv.Itoa(sessionToken.Expires))
+		comebackQuery.Set(o.frontend.ExpiresQuery, strconv.Itoa(sessionToken.Expires))
 		comebackUrl.RawQuery = comebackQuery.Encode()
 		http.Redirect(w, r, comebackUrl.String(), http.StatusTemporaryRedirect)
 

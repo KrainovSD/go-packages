@@ -1,10 +1,5 @@
 package oauth
 
-type Cookie struct {
-	Prefix string
-	Name   string
-}
-
 type User struct {
 	ID       string `json:"id"`
 	UserName string `json:"username"`
@@ -23,10 +18,6 @@ type TokenInfo struct {
 type SessionToken struct {
 	Token   string `json:"token"`
 	Expires int    `json:"expires"`
-}
-
-type oidcProviderClaims struct {
-	EndSessionEndpoint string `json:"end_session_endpoint"`
 }
 
 type OidcToken struct {

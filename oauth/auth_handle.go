@@ -9,14 +9,14 @@ import (
 	"golang.org/x/oauth2"
 )
 
-func (p *OauthProvider) AuthHandle() func(w http.ResponseWriter, r *http.Request) {
+func (o *Oauth) AuthHandle() func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var err error
 
 		/** Generate callback url */
-		var frontendProto = getProto(r, p.oauth.frontendProtocol)
-		var frontendHost = getHost(r, p.oauth.frontendHost)
-		var callbackUrl = frontendProto + "://" + frontendHost + p.callbackPath
+		var frontendProto = getProto(r, o.frontend.Protocol)
+		var frontendHost = getHost(r, o.frontend.Host)
+		var callbackUrl = frontendProto + "://" + frontendHost + o.routing.CallbackPath
 
 		/** Generate comeback url */
 		var comebackPath = r.URL.Query().Get("comeback_path")
@@ -34,15 +34,15 @@ func (p *OauthProvider) AuthHandle() func(w http.ResponseWriter, r *http.Request
 			CallbackUrl: callbackUrl,
 			ComebackUrl: comebackUrl,
 		}); err != nil {
-			p.oauth.redirectError(redirectErrorOptions{
+			o.redirectError(redirectErrorOptions{
 				w:   w,
 				r:   r,
 				err: fmt.Errorf("generate service state: %w", err),
 			})
 			return
 		}
-		if err = p.oauth.setOauthState(r.Context(), oauthState, timeKey); err != nil {
-			p.oauth.redirectError(redirectErrorOptions{
+		if err = o.setOauthState(r.Context(), oauthState, timeKey); err != nil {
+			o.redirectError(redirectErrorOptions{
 				w:   w,
 				r:   r,
 				err: fmt.Errorf("set flow state: %w", err),
@@ -51,20 +51,20 @@ func (p *OauthProvider) AuthHandle() func(w http.ResponseWriter, r *http.Request
 		}
 		/** Set service cookies */
 		http.SetCookie(w, &http.Cookie{
-			Name:     p.oauth.cookieTimeKey.Name,
+			Name:     o.cookieTimeKey.Name,
 			Value:    timeKey,
-			Path:     p.oauth.cookieTimeKey.Prefix,
-			MaxAge:   p.oauth.serviceDataExpires,
+			Path:     o.cookieTimeKey.Prefix,
+			MaxAge:   o.settings.ServiceDataExpiresIn,
 			HttpOnly: true,
 			Secure:   frontendProto == "https",
 		})
-		var config = *p.config
-		config.RedirectURL = callbackUrl
+		var provider = *o.provider
+		provider.RedirectURL = callbackUrl
 		var opts = []oauth2.AuthCodeOption{
 			oauth2.S256ChallengeOption(oauthState.CodeVerifier),
 			oidc.Nonce(oauthState.Nonce),
 		}
-		http.Redirect(w, r, config.AuthCodeURL(oauthState.State, opts...), http.StatusTemporaryRedirect)
+		http.Redirect(w, r, provider.AuthCodeURL(oauthState.State, opts...), http.StatusTemporaryRedirect)
 	}
 
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -16,100 +17,149 @@ import (
 	"golang.org/x/oauth2"
 )
 
-type Oauth struct {
-	redis                      redis.UniversalClient
-	log                        *slog.Logger
-	apiClient                  *api.Client
-	cookieTimeKey              *Cookie
-	cookieRefreshToken         *Cookie
-	cookieSessionToken         *Cookie
-	frontendErrorPath          string
-	frontendClearPath          string
-	frontendLogoutPath         string
-	queryExpires               string
-	stateLength                int
-	serviceDataExpires         int
-	defaultRefreshTokenExpires int
-	frontendHost               string
-	frontendProtocol           string
-	updateToken                func(ctx context.Context, token string) (SessionToken, error)
-	logout                     func(ctx context.Context, token string) error
+type OauthFrontend struct {
+	ClearRedirectPath  string
+	ErrorRedirectPath  string
+	LogoutRedirectPath string
+	Host               string
+	Protocol           string
+	ExpiresQuery       string
+}
+
+func (of *OauthFrontend) newDefault() *OauthFrontend {
+	var o = *of
+	if o.ClearRedirectPath == "" {
+		o.ClearRedirectPath = "/clear"
+	}
+	if o.ErrorRedirectPath == "" {
+		o.ErrorRedirectPath = "/error"
+	}
+	if o.LogoutRedirectPath == "" {
+		o.LogoutRedirectPath = "/logout"
+	}
+	if o.ExpiresQuery == "" {
+		o.ExpiresQuery = "session_token_expires"
+	}
+	return &o
+}
+
+type OauthSettings struct {
+	StateLength                  int
+	ServiceDataExpiresIn         int
+	DefaultRefreshTokenExpiresIn int
+}
+
+func (os *OauthSettings) newDefault() *OauthSettings {
+	var o = *os
+	if o.StateLength == 0 {
+		o.StateLength = 16
+	}
+	if o.ServiceDataExpiresIn == 0 {
+		o.ServiceDataExpiresIn = 5 * 60
+	}
+	return &o
+}
+
+type OauthRouting struct {
+	AuthPath     string
+	CallbackPath string
+	ClearPath    string
+}
+
+func (or *OauthRouting) validate() error {
+	if or == nil {
+		return errors.New("is nil")
+	}
+	if or.AuthPath == "" {
+		return errors.New("auth path is empty")
+	}
+	if or.CallbackPath == "" {
+		return errors.New("callback path is empty")
+	}
+	if or.ClearPath == "" {
+		return errors.New("clear path is empty")
+	}
+	return nil
+}
+
+type OauthProvider struct {
+	ClientID                   string
+	ClientSecret               string
+	Issuer                     string
+	AuthURL                    string
+	TokenURL                   string
+	UserInfoURL                string
+	EndSessionURL              string
+	Scopes                     []string
+	SkipClientIDCheck          bool
+	SkipExpiryCheck            bool
+	SkipIssuerCheck            bool
+	InsecureSkipSignatureCheck bool
+}
+
+func (o *OauthProvider) validate() error {
+	if o == nil {
+		return errors.New("is nil")
+	}
+	if o.ClientID == "" {
+		return errors.New("client id is empty")
+	}
+	if o.ClientSecret == "" {
+		return errors.New("client secret is empty")
+	}
+	if o.Issuer == "" && (o.AuthURL == "" || o.TokenURL == "") {
+		return errors.New("issuer and auth url or token url is empty")
+	}
+	return nil
+}
+
+type OauthHandlers struct {
+	UpdateToken   func(ctx context.Context, token string) (SessionToken, error)
+	EndSession    func(ctx context.Context, token string, URL string) error
+	ParseUser     func(ctx context.Context, response []byte) (User, error)
+	CreateSession func(ctx context.Context, token TokenInfo, user User, verifiedIdToken *oidc.IDToken) (SessionToken, error)
+}
+
+type OauthCookie struct {
+	Prefix string
+	Name   string
 }
 
 type OauthOptions struct {
-	Redis                      redis.UniversalClient
-	ApiClient                  *api.Client
-	Log                        *slog.Logger
-	CookieTimeKey              *Cookie
-	CookieRefreshToken         *Cookie
-	CookieSessionToken         *Cookie
-	FrontendClearPath          string
-	FrontendErrorPath          string
-	FrontendLogoutPath         string
-	QueryExpires               string
-	StateLength                int
-	ServiceDataExpires         int
-	DefaultRefreshTokenExpires int
-	FrontendHost               string
-	FrontendProtocol           string
-	UpdateToken                func(ctx context.Context, token string) (SessionToken, error)
-	Logout                     func(ctx context.Context, token string) error
+	Redis              redis.UniversalClient
+	Http               *http.Client
+	Log                *slog.Logger
+	Frontend           *OauthFrontend
+	Settings           *OauthSettings
+	Routing            *OauthRouting
+	Provider           *OauthProvider
+	Handlers           *OauthHandlers
+	CookieTimeKey      *OauthCookie
+	CookieSessionToken *OauthCookie
+	CookieRefreshToken *OauthCookie
 }
 
-func New(options *OauthOptions) (*Oauth, error) {
-	var err error
-
-	if err = options.validate(); err != nil {
-		return nil, err
+func (oo *OauthOptions) newDefault() *OauthOptions {
+	var o = *oo
+	if o.Frontend == nil {
+		o.Frontend = &OauthFrontend{}
 	}
-
-	return &Oauth{
-		redis:                      options.Redis,
-		apiClient:                  options.ApiClient,
-		log:                        options.Log,
-		cookieTimeKey:              options.CookieTimeKey,
-		cookieRefreshToken:         options.CookieRefreshToken,
-		cookieSessionToken:         options.CookieSessionToken,
-		frontendClearPath:          options.FrontendClearPath,
-		frontendErrorPath:          options.FrontendErrorPath,
-		frontendLogoutPath:         options.FrontendLogoutPath,
-		queryExpires:               options.QueryExpires,
-		stateLength:                options.StateLength,
-		serviceDataExpires:         options.ServiceDataExpires,
-		frontendHost:               options.FrontendHost,
-		frontendProtocol:           options.FrontendProtocol,
-		updateToken:                options.UpdateToken,
-		logout:                     options.Logout,
-		defaultRefreshTokenExpires: options.DefaultRefreshTokenExpires,
-	}, nil
-}
-
-func (o *OauthOptions) validate() error {
-	if o == nil {
-		return errors.New("oauthOptions pointer is nil")
+	o.Frontend = o.Frontend.newDefault()
+	if o.Settings == nil {
+		o.Settings = &OauthSettings{}
 	}
-	if o.Log == nil {
-		return errors.New("log pointer is nil")
+	o.Settings = o.Settings.newDefault()
+	if o.Handlers == nil {
+		o.Handlers = &OauthHandlers{}
 	}
 	if o.CookieTimeKey == nil {
-		o.CookieTimeKey = &Cookie{
-			Prefix: "/",
-			Name:   "session_time_key",
-		}
+		o.CookieTimeKey = &OauthCookie{}
 	}
 	if o.CookieTimeKey.Name == "" {
 		o.CookieTimeKey.Name = "session_time_key"
 	}
 	if o.CookieTimeKey.Prefix == "" {
 		o.CookieTimeKey.Prefix = "/"
-	}
-	if o.CookieRefreshToken != nil {
-		if o.CookieRefreshToken.Name == "" {
-			o.CookieRefreshToken.Name = "session_refresh_token"
-		}
-		if o.CookieRefreshToken.Prefix == "" {
-			o.CookieRefreshToken.Prefix = "/"
-		}
 	}
 	if o.CookieSessionToken != nil {
 		if o.CookieSessionToken.Name == "" {
@@ -119,32 +169,129 @@ func (o *OauthOptions) validate() error {
 			o.CookieSessionToken.Prefix = "/"
 		}
 	}
-	if o.QueryExpires == "" {
-		o.QueryExpires = "session_token_expires"
+	if o.CookieRefreshToken != nil {
+		if o.CookieRefreshToken.Name == "" {
+			o.CookieRefreshToken.Name = "session_refresh_token"
+		}
+		if o.CookieRefreshToken.Prefix == "" {
+			o.CookieRefreshToken.Prefix = "/"
+		}
 	}
-	if o.StateLength == 0 {
-		o.StateLength = 16
-	}
-	if o.ServiceDataExpires == 0 {
-		o.ServiceDataExpires = 5 * 60
-	}
-	if o.FrontendClearPath == "" {
-		o.FrontendClearPath = "/clear"
-	}
-	if o.FrontendLogoutPath == "" {
-		o.FrontendLogoutPath = "/logout"
-	}
-	if o.FrontendErrorPath == "" {
-		o.FrontendErrorPath = "/error"
-	}
+	return &o
+}
 
+func (oo *OauthOptions) validate() error {
+	if oo.Http == nil {
+		return errors.New("http client is nil")
+	}
+	if oo.Log == nil {
+		return errors.New("logger is nil")
+	}
+	var err error
+	if err = oo.Routing.validate(); err != nil {
+		return fmt.Errorf("routing: %w", err)
+	}
+	if err = oo.Provider.validate(); err != nil {
+		return fmt.Errorf("provider: %w", err)
+	}
 	return nil
 }
 
-func (o *Oauth) extractToken(r *http.Request, cookieInfo *Cookie) (string, error) {
-	var token string
+type Oauth struct {
+	redis               redis.UniversalClient
+	http                *http.Client
+	log                 *slog.Logger
+	frontend            *OauthFrontend
+	settings            *OauthSettings
+	routing             *OauthRouting
+	provider            *oauth2.Config
+	handlers            *OauthHandlers
+	userInfoURL         string
+	endSessionURL       string
+	cookieTimeKey       *OauthCookie
+	cookieSessionToken  *OauthCookie
+	cookieRefreshToken  *OauthCookie
+	oidcProvider        *oidc.Provider        // can be nil
+	oidcIdTokenVerifier *oidc.IDTokenVerifier // can be nil
+}
+
+func New(o *OauthOptions) (*Oauth, error) {
 	var err error
-	token = r.Header.Get("Authorization")
+	if err = o.validate(); err != nil {
+		return nil, fmt.Errorf("validate options: %w", err)
+	}
+	var opts = o.newDefault()
+	var userInfoURL = opts.Provider.UserInfoURL
+	var endSessionURL = opts.Provider.EndSessionURL
+	var oauthProvider *oauth2.Config
+	var oidcProvider *oidc.Provider
+	var oidcIdTokenVerifier *oidc.IDTokenVerifier
+	if opts.Provider.Issuer != "" {
+		if oidcProvider, err = oidc.NewProvider(context.WithValue(context.Background(), oauth2.HTTPClient, opts.Http), opts.Provider.Issuer); err != nil {
+			return nil, fmt.Errorf("new oidc provider: %w", err)
+		}
+		oidcIdTokenVerifier = oidcProvider.Verifier(&oidc.Config{
+			ClientID:                   opts.Provider.ClientID,
+			SkipClientIDCheck:          opts.Provider.SkipClientIDCheck,
+			SkipExpiryCheck:            opts.Provider.SkipExpiryCheck,
+			SkipIssuerCheck:            opts.Provider.SkipIssuerCheck,
+			InsecureSkipSignatureCheck: opts.Provider.InsecureSkipSignatureCheck,
+		})
+		var endpoint = oidcProvider.Endpoint()
+		oauthProvider = &oauth2.Config{
+			ClientID:     opts.Provider.ClientID,
+			ClientSecret: opts.Provider.ClientSecret,
+			Endpoint:     endpoint,
+			Scopes:       opts.Provider.Scopes,
+		}
+		if userInfoURL == "" {
+			userInfoURL = oidcProvider.UserInfoEndpoint()
+		}
+		if endSessionURL == "" {
+			var claims struct {
+				EndSessionEndpoint string `json:"end_session_endpoint"`
+			}
+			if err := oidcProvider.Claims(&claims); err == nil && claims.EndSessionEndpoint != "" {
+				endSessionURL = claims.EndSessionEndpoint
+			}
+		}
+	} else {
+		oauthProvider = &oauth2.Config{
+			ClientID:     opts.Provider.ClientID,
+			ClientSecret: opts.Provider.ClientSecret,
+			Endpoint: oauth2.Endpoint{
+				AuthURL:  opts.Provider.AuthURL,
+				TokenURL: opts.Provider.TokenURL,
+			},
+			Scopes: opts.Provider.Scopes,
+		}
+	}
+	return &Oauth{
+		redis:               opts.Redis,
+		http:                opts.Http,
+		log:                 opts.Log,
+		frontend:            opts.Frontend,
+		settings:            opts.Settings,
+		routing:             opts.Routing,
+		provider:            oauthProvider,
+		handlers:            opts.Handlers,
+		userInfoURL:         userInfoURL,
+		endSessionURL:       endSessionURL,
+		cookieTimeKey:       opts.CookieTimeKey,
+		cookieSessionToken:  opts.CookieSessionToken,
+		cookieRefreshToken:  opts.CookieRefreshToken,
+		oidcProvider:        oidcProvider,
+		oidcIdTokenVerifier: oidcIdTokenVerifier,
+	}, nil
+}
+
+func (o *Oauth) newOauthHttpContext(ctx context.Context) context.Context {
+	return context.WithValue(ctx, oauth2.HTTPClient, o.http)
+}
+
+func (o *Oauth) extractToken(r *http.Request, cookieInfo *OauthCookie) (string, error) {
+	var err error
+	var token = r.Header.Get("Authorization")
 	if token != "" {
 		token = strings.Replace(token, "Bearer ", "", 1)
 	} else if cookieInfo != nil {
@@ -184,27 +331,20 @@ func (o *Oauth) redirectError(options redirectErrorOptions) {
 	var frontendHost = options.frontendHost
 	var frontendProto = options.frontendProto
 	if frontendHost == "" {
-		frontendHost = getHost(options.r, o.frontendHost)
+		frontendHost = getHost(options.r, o.frontend.Host)
 	}
 	if frontendProto == "" {
-		frontendProto = getProto(options.r, o.frontendProtocol)
+		frontendProto = getProto(options.r, o.frontend.Protocol)
 	}
 	var comebackUrl = options.comebackUrl
 	if comebackUrl == "" {
 		if frontendProto != "" && frontendHost != "" {
-			comebackUrl = frontendProto + "://" + frontendHost + o.frontendErrorPath
+			comebackUrl = frontendProto + "://" + frontendHost + o.frontend.ErrorRedirectPath
 		} else {
-			comebackUrl = o.frontendErrorPath
+			comebackUrl = o.frontend.ErrorRedirectPath
 		}
 	}
 	http.Redirect(options.w, options.r, comebackUrl, http.StatusTemporaryRedirect)
-}
-
-func (o *Oauth) oauthProviderContext(ctx context.Context) context.Context {
-	if o.apiClient != nil {
-		return context.WithValue(ctx, oauth2.HTTPClient, o.apiClient.Client())
-	}
-	return ctx
 }
 
 func (o *Oauth) setOauthState(ctx context.Context, oauthState oauthState, key string) error {
@@ -216,7 +356,7 @@ func (o *Oauth) setOauthState(ctx context.Context, oauthState oauthState, key st
 	if o.redis == nil {
 		stateStore.Set(key, string(oauthStateBytes))
 	} else {
-		var cmd = o.redis.Set(ctx, key, string(oauthStateBytes), time.Duration(o.serviceDataExpires)*time.Second)
+		var cmd = o.redis.Set(ctx, key, string(oauthStateBytes), time.Duration(o.settings.ServiceDataExpiresIn)*time.Second)
 		if err = cmd.Err(); err != nil {
 			return fmt.Errorf("set flow state in redis: %w", err)
 		}
@@ -247,181 +387,32 @@ func (o *Oauth) getOauthState(ctx context.Context, key string) (oauthState, erro
 	return oauthState, nil
 }
 
-type OauthProvider struct {
-	oauth           *Oauth
-	oidcProvider    *oidc.Provider        // can be nil
-	idTokenVerifier *oidc.IDTokenVerifier // can be nil
-	config          *oauth2.Config
-	loginPath       string
-	tokenPath       string
-	userPath        string
-	logoutPath      string
-	startAuthPath   string
-	callbackPath    string
-	clearPath       string
-	provider        string
-	parseUser       func(ctx context.Context, response []byte) (User, error)
-	parseToken      func(ctx context.Context, response []byte) (TokenInfo, error)
-	createSession   func(ctx context.Context, token TokenInfo, user User, verifiedIdToken *oidc.IDToken) (SessionToken, error)
-}
-
-type OauthProviderOptions struct {
-	ClientId                   string
-	ClientSecret               string
-	Issuer                     string
-	LoginPath                  string
-	TokenPath                  string
-	UserPath                   string
-	LogoutPath                 string
-	StartAuthPath              string
-	CallbackPath               string
-	ClearPath                  string
-	Provider                   string
-	ParseUser                  func(ctx context.Context, response []byte) (User, error)
-	ParseToken                 func(ctx context.Context, response []byte) (TokenInfo, error)
-	CreateSession              func(ctx context.Context, token TokenInfo, user User, verifiedIdToken *oidc.IDToken) (SessionToken, error)
-	Scopes                     []string
-	SkipClientIDCheck          bool
-	SkipExpiryCheck            bool
-	SkipIssuerCheck            bool
-	InsecureSkipSignatureCheck bool
-}
-
-func (o *Oauth) NewProvider(options *OauthProviderOptions) (*OauthProvider, error) {
-	var err error
-	var provider *OauthProvider
-
-	if o == nil {
-		return provider, errors.New("oauth pointer is nil")
-	}
-
-	var oidcProvider *oidc.Provider
-	var idTokenVerifier *oidc.IDTokenVerifier
-
-	if options.Issuer != "" {
-		var providerCtx = o.oauthProviderContext(context.Background())
-		if oidcProvider, err = oidc.NewProvider(providerCtx, options.Issuer); err != nil {
-			return provider, fmt.Errorf("oidc discovery: %w", err)
-		}
-		var claims oidcProviderClaims
-		if err = oidcProvider.Claims(&claims); err == nil && claims.EndSessionEndpoint != "" && options.LogoutPath == "" {
-			options.LogoutPath = claims.EndSessionEndpoint
-		}
-		var endpoint = oidcProvider.Endpoint()
-		if options.LoginPath == "" {
-			options.LoginPath = endpoint.AuthURL
-		}
-		if options.TokenPath == "" {
-			options.TokenPath = endpoint.TokenURL
-		}
-		if options.UserPath == "" {
-			options.UserPath = oidcProvider.UserInfoEndpoint()
-		}
-
-		idTokenVerifier = oidcProvider.Verifier(&oidc.Config{
-			ClientID:                   options.ClientId,
-			SkipClientIDCheck:          options.SkipClientIDCheck,
-			SkipExpiryCheck:            options.SkipExpiryCheck,
-			SkipIssuerCheck:            options.SkipIssuerCheck,
-			InsecureSkipSignatureCheck: options.InsecureSkipSignatureCheck,
-		})
-	}
-
-	if err = options.validate(); err != nil {
-		return provider, fmt.Errorf("validate oauth provider: %w", err)
-	}
-
-	return &OauthProvider{
-		oauth:           o,
-		oidcProvider:    oidcProvider,
-		idTokenVerifier: idTokenVerifier,
-		config: &oauth2.Config{
-			ClientID:     options.ClientId,
-			ClientSecret: options.ClientSecret,
-			Endpoint: oauth2.Endpoint{
-				AuthURL:  options.LoginPath,
-				TokenURL: options.TokenPath,
-			},
-			Scopes: options.Scopes,
-		},
-		provider:      options.Provider,
-		loginPath:     options.LoginPath,
-		tokenPath:     options.TokenPath,
-		logoutPath:    options.LogoutPath,
-		userPath:      options.UserPath,
-		startAuthPath: options.StartAuthPath,
-		callbackPath:  options.CallbackPath,
-		clearPath:     options.ClearPath,
-		parseUser:     options.ParseUser,
-		parseToken:    options.ParseToken,
-		createSession: options.CreateSession,
-	}, nil
-}
-
-func (o *OauthProviderOptions) validate() error {
-	if o == nil {
-		return errors.New("oauthRegisterOptions pointer is nil")
-	}
-	if o.ClientId == "" {
-		return errors.New("clientId is empty")
-	}
-	if o.ClientSecret == "" {
-		return errors.New("clientSecret is empty")
-	}
-	if o.LoginPath == "" {
-		return errors.New("loginPath is empty")
-	}
-	if o.TokenPath == "" {
-		return errors.New("tokenPath is empty")
-	}
-	if o.UserPath == "" {
-		return errors.New("userPath is empty")
-	}
-	if o.LogoutPath == "" {
-		return errors.New("logoutPath is empty")
-	}
-	if o.CallbackPath == "" {
-		return errors.New("callbackPath is empty")
-	}
-	if o.ClearPath == "" {
-		return errors.New("clearPath is empty")
-	}
-	if o.StartAuthPath == "" {
-		return errors.New("startAuthPath is empty")
-	}
-	if o.Provider == "" {
-		return errors.New("provider is empty")
-	}
-
-	return nil
-}
-
-func (p *OauthProvider) exchangeTokenByRefresh(ctx context.Context, refreshToken string) (TokenInfo, error) {
+func (o *Oauth) exchangeTokenByRefresh(ctx context.Context, refreshToken string) (TokenInfo, error) {
 	var err error
 	var oauthToken *oauth2.Token
-	if oauthToken, err = p.config.TokenSource(p.oauth.oauthProviderContext(ctx), &oauth2.Token{
+	if oauthToken, err = o.provider.TokenSource(o.newOauthHttpContext(ctx), &oauth2.Token{
 		RefreshToken: refreshToken,
 	}).Token(); err != nil {
 		return TokenInfo{}, fmt.Errorf("request token: %w", err)
 	}
-	return p.newTokenInfo(oauthToken), nil
+	return o.newTokenInfo(oauthToken), nil
 }
 
-func (p *OauthProvider) exchangeToken(ctx context.Context, code string, codeVerifier string, callbackUrl string) (TokenInfo, error) {
+func (o *Oauth) exchangeToken(ctx context.Context, code string, codeVerifier string, callbackUrl string) (TokenInfo, error) {
 	var err error
-	var config = *p.config
-	config.RedirectURL = callbackUrl
+	var provider = *o.provider
+	provider.RedirectURL = callbackUrl
 	var opts = []oauth2.AuthCodeOption{
 		oauth2.VerifierOption(codeVerifier),
 	}
 	var oauthToken *oauth2.Token
-	if oauthToken, err = config.Exchange(p.oauth.oauthProviderContext(ctx), code, opts...); err != nil {
+	if oauthToken, err = provider.Exchange(o.newOauthHttpContext(ctx), code, opts...); err != nil {
 		return TokenInfo{}, fmt.Errorf("request token: %w", err)
 	}
-	return p.newTokenInfo(oauthToken), nil
+	return o.newTokenInfo(oauthToken), nil
 }
 
-func (p *OauthProvider) newTokenInfo(oauthToken *oauth2.Token) TokenInfo {
+func (o *Oauth) newTokenInfo(oauthToken *oauth2.Token) TokenInfo {
 	var token = TokenInfo{
 		AccessToken:  oauthToken.AccessToken,
 		RefreshToken: oauthToken.RefreshToken,
@@ -444,8 +435,8 @@ func (p *OauthProvider) newTokenInfo(oauthToken *oauth2.Token) TokenInfo {
 
 	}
 	if token.RefreshToken != "" && token.RefreshTokenExpiresIn == 0 {
-		if p.oauth.defaultRefreshTokenExpires != 0 {
-			token.RefreshTokenExpiresIn = p.oauth.defaultRefreshTokenExpires
+		if o.settings.DefaultRefreshTokenExpiresIn != 0 {
+			token.RefreshTokenExpiresIn = o.settings.DefaultRefreshTokenExpiresIn
 		} else {
 			token.RefreshTokenExpiresIn = token.ExpiresIn * 10
 		}
@@ -453,40 +444,71 @@ func (p *OauthProvider) newTokenInfo(oauthToken *oauth2.Token) TokenInfo {
 	return token
 }
 
-func (o *OauthProvider) getUser(ctx context.Context, token string, client *api.Client) (User, error) {
-	var response api.Response
+func (o *Oauth) getUser(ctx context.Context, token string) (User, error) {
 	var err error
 	var user User
-
-	if client == nil {
-		return user, fmt.Errorf("client is nil")
+	var req *http.Request
+	if req, err = http.NewRequestWithContext(ctx, string(api.METHOD_POST), o.userInfoURL, nil); err != nil {
+		return User{}, fmt.Errorf("create request: %w", err)
 	}
-
-	if response, err = client.Send(api.Request{
-		Url:         o.userPath,
-		Method:      api.METHOD_GET,
-		ContentType: api.CONTENT_TYPE_JSON,
-		Headers:     map[string]string{"Authorization": "Bearer " + token},
-	}); err != nil {
-
-		return user, fmt.Errorf("request user: %w", err)
+	req.Header.Add("Authorization", "Bearer "+token)
+	req.Header.Add("Content-Type", string(api.CONTENT_TYPE_JSON))
+	var res *http.Response
+	if res, err = o.http.Do(req); err != nil {
+		return User{}, fmt.Errorf("do request: %w", err)
 	}
-
-	if user, err = o.parseUser(ctx, response.Data); err != nil {
+	defer res.Body.Close()
+	var content []byte
+	if content, err = io.ReadAll(io.LimitReader(res.Body, 10<<20)); err != nil {
+		return User{}, fmt.Errorf("read request: %w", err)
+	}
+	if user, err = o.handlers.ParseUser(ctx, content); err != nil {
 		return user, fmt.Errorf("parse user: %w", err)
 	}
-
 	return user, nil
 }
 
-func (p *OauthProvider) verifyIdToken(ctx context.Context, rawIdToken string) (*oidc.IDToken, error) {
-	if p.idTokenVerifier == nil || rawIdToken == "" {
+func (o *Oauth) verifyIdToken(ctx context.Context, rawIdToken string) (*oidc.IDToken, error) {
+	if o.oidcIdTokenVerifier == nil || rawIdToken == "" {
 		return nil, nil
 	}
 	var idToken *oidc.IDToken
 	var err error
-	if idToken, err = p.idTokenVerifier.Verify(ctx, rawIdToken); err != nil {
+	if idToken, err = o.oidcIdTokenVerifier.Verify(ctx, rawIdToken); err != nil {
 		return nil, fmt.Errorf("verify id token: %w", err)
 	}
 	return idToken, nil
+}
+
+func (o *Oauth) clearTokens(w http.ResponseWriter, protocol string) {
+	if o.cookieTimeKey != nil {
+		http.SetCookie(w, &http.Cookie{
+			Name:     o.cookieTimeKey.Name,
+			Value:    "",
+			Path:     o.cookieTimeKey.Prefix,
+			MaxAge:   -1,
+			HttpOnly: true,
+			Secure:   protocol == "https",
+		})
+	}
+	if o.cookieRefreshToken != nil {
+		http.SetCookie(w, &http.Cookie{
+			Name:     o.cookieRefreshToken.Name,
+			Value:    "",
+			Path:     o.cookieRefreshToken.Prefix,
+			MaxAge:   -1,
+			HttpOnly: true,
+			Secure:   protocol == "https",
+		})
+	}
+	if o.cookieSessionToken != nil {
+		http.SetCookie(w, &http.Cookie{
+			Name:     o.cookieSessionToken.Name,
+			Value:    "",
+			Path:     o.cookieSessionToken.Prefix,
+			MaxAge:   -1,
+			HttpOnly: true,
+			Secure:   protocol == "https",
+		})
+	}
 }
