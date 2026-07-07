@@ -3,6 +3,8 @@ package oauth
 import (
 	"fmt"
 	"net/http"
+
+	"github.com/KrainovSD/go-packages/helpers"
 )
 
 func (p *OauthProvider) LogoutHandle() func(w http.ResponseWriter, r *http.Request) {
@@ -32,9 +34,8 @@ func (p *OauthProvider) LogoutHandle() func(w http.ResponseWriter, r *http.Reque
 			})
 			return
 		}
-
 		var timeKey string
-		if timeKey, err = randomHex(32); err != nil {
+		if timeKey, err = helpers.RandomHex(32); err != nil {
 			p.oauth.redirectError(redirectErrorOptions{
 				w:             w,
 				r:             r,
@@ -60,16 +61,14 @@ func (p *OauthProvider) LogoutHandle() func(w http.ResponseWriter, r *http.Reque
 			})
 			return
 		}
-		if p.oauth.cookieTimeKey != nil {
-			http.SetCookie(w, &http.Cookie{
-				Name:     p.oauth.cookieTimeKey.Name,
-				Value:    timeKey,
-				Path:     p.oauth.cookieTimeKey.Prefix,
-				MaxAge:   p.oauth.serviceDataExpires,
-				HttpOnly: true,
-				Secure:   frontendProto == "https",
-			})
-		}
+		http.SetCookie(w, &http.Cookie{
+			Name:     p.oauth.cookieTimeKey.Name,
+			Value:    timeKey,
+			Path:     p.oauth.cookieTimeKey.Prefix,
+			MaxAge:   p.oauth.serviceDataExpires,
+			HttpOnly: true,
+			Secure:   frontendProto == "https",
+		})
 		var tokenId string
 		if tokenId, err = p.oauth.extractToken(r, p.oauth.cookieSessionToken); err != nil {
 			// use fallback url for re-auth and set token id to cookie
@@ -83,7 +82,7 @@ func (p *OauthProvider) LogoutHandle() func(w http.ResponseWriter, r *http.Reque
 
 		}
 		var logoutUrl string
-		if logoutUrl, err = generateLogoutUrl(p.logoutPath, comebackUrl, tokenId, p.clientId); err != nil {
+		if logoutUrl, err = generateLogoutUrl(p.logoutPath, comebackUrl, tokenId, p.config.ClientID); err != nil {
 			p.oauth.redirectError(redirectErrorOptions{
 				w:             w,
 				r:             r,

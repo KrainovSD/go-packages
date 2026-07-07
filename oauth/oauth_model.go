@@ -25,18 +25,8 @@ type SessionToken struct {
 	Expires int    `json:"expires"`
 }
 
-type IdTokenClaim struct {
-	Exp int `json:"exp"`
-	Iat int `json:"iat"`
-}
-
-type OidcConfig struct {
-	Issuer     string `json:"issuer"`
-	UserPath   string `json:"userinfo_endpoint"`
-	TokenPath  string `json:"token_endpoint"`
-	LoginPath  string `json:"authorization_endpoint"`
-	LogoutPath string `json:"end_session_endpoint"`
-	JwksUri    string `json:"jwks_uri"`
+type oidcProviderClaims struct {
+	EndSessionEndpoint string `json:"end_session_endpoint"`
 }
 
 type OidcToken struct {
@@ -58,7 +48,7 @@ type logoutState struct {
 	Proto string `json:"proto"`
 }
 
-type flowState struct {
+type oauthState struct {
 	State               string `json:"state"`
 	Nonce               string `json:"nonce"`
 	CodeVerifier        string `json:"code_verifier"`

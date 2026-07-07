@@ -2,19 +2,16 @@ package oauth
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
 	"crypto/subtle"
-	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
-	"strings"
-	"sync"
 	"time"
 
+	"golang.org/x/oauth2"
+
+	"github.com/KrainovSD/go-packages/helpers"
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/redis/go-redis/v9"
 )
@@ -36,79 +33,38 @@ func getIdTokenExpires(token *oidc.IDToken) int {
 	return int(token.Expiry.Sub(token.IssuedAt).Seconds())
 }
 
-type StateStore struct {
-	store map[string]string
-	mutex sync.RWMutex
-}
-
-var stateStore = StateStore{
-	store: map[string]string{},
-	mutex: sync.RWMutex{},
-}
-
-func (s *StateStore) Get(key string) string {
-	s.mutex.Lock()
-	result := s.store[key]
-	delete(s.store, key)
-	s.mutex.Unlock()
-
-	return result
-}
-func (s *StateStore) Set(key string, value string) {
-	s.mutex.Lock()
-	s.store[key] = value
-	s.mutex.Unlock()
-}
-
-func generateCodeChallenge(verifier string) string {
-	hash := sha256.Sum256([]byte(verifier))
-
-	return base64.RawURLEncoding.EncodeToString(hash[:])
-}
-
 func safeCompare(a string, b string) bool {
 	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }
 
-type oauthState struct {
-	State         string
-	TimeKey       string
-	Nonce         string
-	CodeVerifier  string
-	CodeChallenge string
+type oauthStateOptions struct {
+	CallbackUrl         string
+	ComebackUrl         string
+	ClientCodeChallenge string
 }
 
-func generateOauthServiceState() (oauthState, error) {
-	var err error
-	var servicesState oauthState
-
-	state, err := randomHex(32)
+func newOauthState(opts oauthStateOptions) (oauthState, string, error) {
+	var state, err = helpers.RandomHex(32)
 	if err != nil {
-		return servicesState, fmt.Errorf("generate state: %w", err)
+		return oauthState{}, "", fmt.Errorf("generate state: %w", err)
 	}
-	timeKey, err := randomHex(32)
-	if err != nil {
-		return servicesState, fmt.Errorf("generate timeKey: %w", err)
+	var timeKey string
+	if timeKey, err = helpers.RandomHex(32); err != nil {
+		return oauthState{}, timeKey, fmt.Errorf("generate timeKey: %w", err)
 	}
-	nonce, err := randomBase64(32)
-	if err != nil {
-		return servicesState, fmt.Errorf("generate nonce: %w", err)
+	var nonce string
+	if nonce, err = helpers.RandomBase64(32); err != nil {
+		return oauthState{}, timeKey, fmt.Errorf("generate nonce: %w", err)
 	}
-	codeVerifier, err := randomHex(64)
-	if err != nil {
-		return servicesState, fmt.Errorf("generate codeVerifier: %w", err)
-	}
-	codeChallenge := generateCodeChallenge(codeVerifier)
-
-	servicesState = oauthState{
-		State:         state,
-		TimeKey:       timeKey,
-		Nonce:         nonce,
-		CodeVerifier:  codeVerifier,
-		CodeChallenge: codeChallenge,
-	}
-
-	return servicesState, nil
+	var codeVerifier = oauth2.GenerateVerifier()
+	return oauthState{
+		State:               state,
+		Nonce:               nonce,
+		CodeVerifier:        codeVerifier,
+		ClientCodeChallenge: opts.ClientCodeChallenge,
+		CallbackUrl:         opts.CallbackUrl,
+		ComebackUrl:         opts.ComebackUrl,
+	}, timeKey, nil
 }
 
 func setLogoutState(ctx context.Context, logoutState logoutState, key string, serviceDataExpires int, redisClient redis.UniversalClient) error {
@@ -153,49 +109,6 @@ func getLogoutState(ctx context.Context, key string, redisClient redis.Universal
 	return state, nil
 }
 
-func setFlowState(ctx context.Context, flowState flowState, key string, serviceDataExpires int, redisClient redis.UniversalClient) error {
-	var flowStateBytes []byte
-	var err error
-
-	if flowStateBytes, err = json.Marshal(flowState); err != nil {
-		return fmt.Errorf("parse flow state: %w", err)
-	}
-
-	if redisClient == nil {
-		stateStore.Set(key, string(flowStateBytes))
-	} else {
-		var cmd = redisClient.Set(ctx, key, string(flowStateBytes), time.Duration(serviceDataExpires)*time.Second)
-		if err = cmd.Err(); err != nil {
-			return fmt.Errorf("set flow state in redis: %w", err)
-		}
-	}
-
-	return nil
-}
-
-func getFlowState(ctx context.Context, key string, redisClient redis.UniversalClient) (flowState, error) {
-	var fstate flowState
-	if key == "" {
-		return fstate, fmt.Errorf("empty key")
-	}
-	var err error
-	var fstateStr string
-	if redisClient == nil {
-		fstateStr = stateStore.Get(key)
-	} else {
-		var cmd = redisClient.Get(ctx, key)
-		if fstateStr, err = cmd.Result(); err != nil {
-			return fstate, fmt.Errorf("get flow state from redis: %w", err)
-		}
-		redisClient.Del(ctx, key)
-	}
-	if err = json.Unmarshal([]byte(fstateStr), &fstate); err != nil {
-		return fstate, fmt.Errorf("parse flow state: %w", err)
-
-	}
-	return fstate, nil
-}
-
 type authUrlOptions struct {
 	Url           string
 	Nonce         string
@@ -204,32 +117,6 @@ type authUrlOptions struct {
 	ClientId      string
 	CallbackUrl   string
 	Scopes        []string
-}
-
-func generateLogUrl(options authUrlOptions) (string, error) {
-	var logUrl *url.URL
-	var err error
-
-	if logUrl, err = url.Parse(options.Url); err != nil {
-		return "", fmt.Errorf("parse login url: %w", err)
-	}
-	query := logUrl.Query()
-	query.Add("nonce", options.Nonce)
-	// with pkce
-	if options.CodeChallenge != "" {
-		query.Add("code_challenge", options.CodeChallenge)
-		query.Add("code_challenge_method", "S256")
-	}
-	query.Add("state", options.State)
-	query.Add("client_id", options.ClientId)
-	query.Add("response_type", "code")
-	query.Add("redirect_uri", options.CallbackUrl)
-	if len(options.Scopes) > 0 {
-		query.Add("scope", strings.Join(options.Scopes, " "))
-	}
-	logUrl.RawQuery = query.Encode()
-
-	return logUrl.String(), nil
 }
 
 func generateLogoutUrl(baseUrl string, comebackUrl string, tokenId string, clientId string) (string, error) {
@@ -314,22 +201,4 @@ func getHost(r *http.Request, custom string) string {
 	}
 
 	return host
-}
-
-func randomHex(length int) (string, error) {
-	bytes := make([]byte, (length+1)/2)
-	if _, err := rand.Read(bytes); err != nil {
-		return "", err
-	}
-
-	return hex.EncodeToString(bytes), nil
-}
-
-func randomBase64(length int) (string, error) {
-	bytes := make([]byte, (length+1)/2)
-	if _, err := rand.Read(bytes); err != nil {
-		return "", err
-	}
-
-	return base64.URLEncoding.EncodeToString(bytes), nil
 }

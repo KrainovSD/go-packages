@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+
+	"github.com/coreos/go-oidc/v3/oidc"
+	"golang.org/x/oauth2"
 )
 
 func (p *OauthProvider) AuthHandle() func(w http.ResponseWriter, r *http.Request) {
@@ -25,8 +28,12 @@ func (p *OauthProvider) AuthHandle() func(w http.ResponseWriter, r *http.Request
 		}
 
 		/** Generate oauth specific variables and store them by timeKey or flowId */
-		var ostate oauthState
-		if ostate, err = generateOauthServiceState(); err != nil {
+		var oauthState oauthState
+		var timeKey string
+		if oauthState, timeKey, err = newOauthState(oauthStateOptions{
+			CallbackUrl: callbackUrl,
+			ComebackUrl: comebackUrl,
+		}); err != nil {
 			p.oauth.redirectError(redirectErrorOptions{
 				w:   w,
 				r:   r,
@@ -34,14 +41,7 @@ func (p *OauthProvider) AuthHandle() func(w http.ResponseWriter, r *http.Request
 			})
 			return
 		}
-		fsate := flowState{
-			State:        ostate.State,
-			Nonce:        ostate.Nonce,
-			CodeVerifier: ostate.CodeVerifier,
-			CallbackUrl:  callbackUrl,
-			ComebackUrl:  comebackUrl,
-		}
-		if err = setFlowState(r.Context(), fsate, ostate.TimeKey, p.oauth.serviceDataExpires, p.oauth.redis); err != nil {
+		if err = p.oauth.setOauthState(r.Context(), oauthState, timeKey); err != nil {
 			p.oauth.redirectError(redirectErrorOptions{
 				w:   w,
 				r:   r,
@@ -49,40 +49,22 @@ func (p *OauthProvider) AuthHandle() func(w http.ResponseWriter, r *http.Request
 			})
 			return
 		}
-
 		/** Set service cookies */
-		if p.oauth.cookieTimeKey != nil {
-			http.SetCookie(w, &http.Cookie{
-				Name:     p.oauth.cookieTimeKey.Name,
-				Value:    ostate.TimeKey,
-				Path:     p.oauth.cookieTimeKey.Prefix,
-				MaxAge:   p.oauth.serviceDataExpires,
-				HttpOnly: true,
-				Secure:   frontendProto == "https",
-			})
+		http.SetCookie(w, &http.Cookie{
+			Name:     p.oauth.cookieTimeKey.Name,
+			Value:    timeKey,
+			Path:     p.oauth.cookieTimeKey.Prefix,
+			MaxAge:   p.oauth.serviceDataExpires,
+			HttpOnly: true,
+			Secure:   frontendProto == "https",
+		})
+		var config = *p.config
+		config.RedirectURL = callbackUrl
+		var opts = []oauth2.AuthCodeOption{
+			oauth2.S256ChallengeOption(oauthState.CodeVerifier),
+			oidc.Nonce(oauthState.Nonce),
 		}
-
-		/** Generate oauth url */
-		var logUrl string
-		if logUrl, err = generateLogUrl(authUrlOptions{
-			Url:           p.loginPath,
-			Nonce:         ostate.Nonce,
-			State:         ostate.State,
-			ClientId:      p.clientId,
-			CallbackUrl:   callbackUrl,
-			Scopes:        p.scopes,
-			CodeChallenge: ostate.CodeChallenge,
-		}); err != nil {
-			p.oauth.redirectError(redirectErrorOptions{
-				w:   w,
-				r:   r,
-				err: fmt.Errorf("generate logUrl: %w", err),
-			})
-			return
-		}
-
-		http.Redirect(w, r, logUrl, http.StatusTemporaryRedirect)
-
+		http.Redirect(w, r, config.AuthCodeURL(oauthState.State, opts...), http.StatusTemporaryRedirect)
 	}
 
 }

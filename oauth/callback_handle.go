@@ -14,24 +14,17 @@ func (p *OauthProvider) CallbackHandle() func(w http.ResponseWriter, r *http.Req
 		var err error
 		var code = r.URL.Query().Get("code")
 		var state = r.URL.Query().Get("state")
-
-		/** extract flow state */
-		var timeKey string
-		if p.oauth.cookieTimeKey != nil {
-			var timeKeyCookie *http.Cookie
-			if timeKeyCookie, err = r.Cookie(p.oauth.cookieTimeKey.Name); err != nil {
-				p.oauth.redirectError(redirectErrorOptions{
-					w:   w,
-					r:   r,
-					err: fmt.Errorf("get time key: %w", err),
-				})
-				return
-			}
-			timeKey = timeKeyCookie.Value
+		var timeKeyCookie *http.Cookie
+		if timeKeyCookie, err = r.Cookie(p.oauth.cookieTimeKey.Name); err != nil {
+			p.oauth.redirectError(redirectErrorOptions{
+				w:   w,
+				r:   r,
+				err: fmt.Errorf("get time key: %w", err),
+			})
+			return
 		}
-
-		var fstate flowState
-		if fstate, err = getFlowState(r.Context(), timeKey, p.oauth.redis); err != nil {
+		var oauthState oauthState
+		if oauthState, err = p.oauth.getOauthState(r.Context(), timeKeyCookie.Value); err != nil {
 			p.oauth.redirectError(redirectErrorOptions{
 				w:   w,
 				r:   r,
@@ -39,10 +32,8 @@ func (p *OauthProvider) CallbackHandle() func(w http.ResponseWriter, r *http.Req
 			})
 			return
 		}
-
-		/** get comeback url */
 		var comebackUrl *url.URL
-		if comebackUrl, err = url.Parse(fstate.ComebackUrl); err != nil {
+		if comebackUrl, err = url.Parse(oauthState.ComebackUrl); err != nil {
 			p.oauth.redirectError(redirectErrorOptions{
 				w:   w,
 				r:   r,
@@ -52,20 +43,15 @@ func (p *OauthProvider) CallbackHandle() func(w http.ResponseWriter, r *http.Req
 		}
 		var proto = comebackUrl.Scheme
 		var host = comebackUrl.Host
-
-		/** clear service cookies */
-		if p.oauth.cookieTimeKey != nil {
-			http.SetCookie(w, &http.Cookie{
-				Name:     p.oauth.cookieTimeKey.Name,
-				Value:    "",
-				Path:     p.oauth.cookieTimeKey.Prefix,
-				MaxAge:   -1,
-				HttpOnly: true,
-				Secure:   proto == "https",
-			})
-		}
-		/** check state */
-		if !safeCompare(fstate.State, state) {
+		http.SetCookie(w, &http.Cookie{
+			Name:     p.oauth.cookieTimeKey.Name,
+			Value:    "",
+			Path:     p.oauth.cookieTimeKey.Prefix,
+			MaxAge:   -1,
+			HttpOnly: true,
+			Secure:   proto == "https",
+		})
+		if !safeCompare(oauthState.State, state) {
 			p.oauth.redirectError(redirectErrorOptions{
 				w:             w,
 				r:             r,
@@ -75,14 +61,8 @@ func (p *OauthProvider) CallbackHandle() func(w http.ResponseWriter, r *http.Req
 			})
 			return
 		}
-		/** get access token */
 		var tokenInfo TokenInfo
-		if tokenInfo, err = p.getToken(r.Context(), getTokenOptions{
-			CodeVerifier: fstate.CodeVerifier,
-			Code:         code,
-			CallbackUrl:  fstate.CallbackUrl,
-			ApiClient:    p.oauth.apiClient,
-		}); err != nil {
+		if tokenInfo, err = p.exchangeToken(r.Context(), code, oauthState.CodeVerifier, oauthState.CallbackUrl); err != nil {
 			p.oauth.redirectError(redirectErrorOptions{
 				w:             w,
 				r:             r,
@@ -92,7 +72,6 @@ func (p *OauthProvider) CallbackHandle() func(w http.ResponseWriter, r *http.Req
 			})
 			return
 		}
-		/** validate if OIDC protocol supported  */
 		var verifiedIdToken *oidc.IDToken
 		if verifiedIdToken, err = p.verifyIdToken(r.Context(), tokenInfo.IdToken); err != nil {
 			p.oauth.redirectError(redirectErrorOptions{
@@ -104,17 +83,16 @@ func (p *OauthProvider) CallbackHandle() func(w http.ResponseWriter, r *http.Req
 			})
 			return
 		}
-		if verifiedIdToken != nil && !safeCompare(verifiedIdToken.Nonce, fstate.Nonce) {
+		if verifiedIdToken != nil && !safeCompare(verifiedIdToken.Nonce, oauthState.Nonce) {
 			p.oauth.redirectError(redirectErrorOptions{
 				w:             w,
 				r:             r,
 				frontendHost:  host,
 				frontendProto: proto,
-				err:           fmt.Errorf("validate nonce, expected: %s, received: %s", fstate.Nonce, verifiedIdToken.Nonce),
+				err:           fmt.Errorf("validate nonce, expected: %s, received: %s", oauthState.Nonce, verifiedIdToken.Nonce),
 			})
 			return
 		}
-		/** get user */
 		var user User
 		if p.parseUser != nil {
 			if user, err = p.getUser(r.Context(), tokenInfo.AccessToken, p.oauth.apiClient); err != nil {
@@ -128,8 +106,6 @@ func (p *OauthProvider) CallbackHandle() func(w http.ResponseWriter, r *http.Req
 				return
 			}
 		}
-
-		/** create session */
 		var sessionToken SessionToken
 		if p.createSession != nil {
 			if sessionToken, err = p.createSession(r.Context(), tokenInfo, user, verifiedIdToken); err != nil {

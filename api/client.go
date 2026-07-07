@@ -88,6 +88,10 @@ func NewClient(opts *ClientOptions) (*Client, error) {
 	}, nil
 }
 
+func (c *Client) Client() *http.Client {
+	return c.client
+}
+
 func (c *Client) Close() {
 	c.client.CloseIdleConnections()
 }

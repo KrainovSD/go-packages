@@ -34,7 +34,7 @@ func (p *OauthProvider) TokenHandle() func(w http.ResponseWriter, r *http.Reques
 			}
 		} else if p.oauth.cookieRefreshToken != nil {
 			var tokenInfo TokenInfo
-			if tokenInfo, err = p.getTokenByRefresh(r.Context(), p.oauth.apiClient, token); err != nil {
+			if tokenInfo, err = p.exchangeTokenByRefresh(r.Context(), token); err != nil {
 				p.oauth.sendError(w, r, fmt.Errorf("request token: %w", err), 401)
 				return
 			}
