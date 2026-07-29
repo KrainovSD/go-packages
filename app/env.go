@@ -13,6 +13,7 @@ type EnvConfig struct {
 	Redis      *EnvRedisConfig
 	Postgres   *EnvPostgresConfig
 	ClickHouse *EnvClickHouseConfig
+	Minio      *EnvMinioConfig
 	System     *EnvSystemConfig
 }
 
@@ -46,6 +47,14 @@ type EnvClickHouseConfig struct {
 	Connection string
 }
 
+type EnvMinioConfig struct {
+	Address   string
+	AccessKey string
+	SecretKey string
+	Secure    bool
+	Location  string
+}
+
 type EnvSystemConfig struct {
 	Port                 int
 	LogLevel             slog.Level
@@ -61,6 +70,7 @@ func NewEnvConfig(prefix string) *EnvConfig {
 		Redis:      NewEnvRedisConfig(prefix),
 		Postgres:   NewEnvPostgresConfig(prefix),
 		ClickHouse: NewEnvClickHouseConfig(prefix),
+		Minio:      NewEnvMinioConfig(prefix),
 		System:     NewEnvSystemConfig(prefix),
 	}
 	return config
@@ -109,6 +119,17 @@ func NewEnvClickHouseConfig(prefix string) *EnvClickHouseConfig {
 	var prefixer = newEnvPrefixer(prefix)
 	var config = &EnvClickHouseConfig{}
 	config.Connection = prefixer("CLICKHOUSE_CONNECTION")
+	return config
+}
+
+func NewEnvMinioConfig(prefix string) *EnvMinioConfig {
+	var prefixer = newEnvPrefixer(prefix)
+	var config = &EnvMinioConfig{}
+	config.Address = prefixer("MINIO_ADDRESS")
+	config.AccessKey = prefixer("MINIO_ACCESS_KEY")
+	config.SecretKey = prefixer("MINIO_SECRET_KEY")
+	config.Location = prefixer("MINIO_LOCATION")
+	config.Secure = helpers.ParseEnvBool(prefixer("MINIO_SECURE"))
 	return config
 }
 
