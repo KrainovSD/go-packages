@@ -2,6 +2,7 @@ package web
 
 import (
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -74,4 +75,37 @@ type Response struct {
 	Message string `json:"message,omitempty"`
 	Code    int    `json:"code,omitempty"`
 	Status  int    `json:"status,omitempty"`
+}
+
+type Query struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+func ParseRawQuery(rawQuery string) []Query {
+	if rawQuery == "" {
+		return nil
+	}
+	var parts = strings.Split(rawQuery, "&")
+	var result = make([]Query, 0, len(parts))
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+		var key, value string
+		if idx := strings.IndexByte(part, '='); idx >= 0 {
+			key = part[:idx]
+			value = part[idx+1:]
+		} else {
+			key = part
+		}
+		if decodedKey, err := url.QueryUnescape(key); err == nil {
+			key = decodedKey
+		}
+		if decodedValue, err := url.QueryUnescape(value); err == nil {
+			value = decodedValue
+		}
+		result = append(result, Query{Key: key, Value: value})
+	}
+	return result
 }

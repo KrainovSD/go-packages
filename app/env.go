@@ -9,11 +9,11 @@ import (
 )
 
 type EnvConfig struct {
-	Kafka     *EnvKafkaConfig
-	Redis     *EnvRedisConfig
-	Postgres  *EnvPostgresConfig
+	Kafka      *EnvKafkaConfig
+	Redis      *EnvRedisConfig
+	Postgres   *EnvPostgresConfig
 	ClickHouse *EnvClickHouseConfig
-	System    *EnvSystemConfig
+	System     *EnvSystemConfig
 }
 
 type EnvKafkaConfig struct {
@@ -57,62 +57,87 @@ type EnvSystemConfig struct {
 
 func NewEnvConfig(prefix string) *EnvConfig {
 	var config = &EnvConfig{
-		Kafka:     &EnvKafkaConfig{},
-		Redis:     &EnvRedisConfig{},
-		Postgres:  &EnvPostgresConfig{},
-		ClickHouse: &EnvClickHouseConfig{},
-		System:    &EnvSystemConfig{},
+		Kafka:      NewEnvKafkaConfig(prefix),
+		Redis:      NewEnvRedisConfig(prefix),
+		Postgres:   NewEnvPostgresConfig(prefix),
+		ClickHouse: NewEnvClickHouseConfig(prefix),
+		System:     NewEnvSystemConfig(prefix),
 	}
+	return config
+}
+
+func NewEnvKafkaConfig(prefix string) *EnvKafkaConfig {
 	var prefixer = newEnvPrefixer(prefix)
+	var config = &EnvKafkaConfig{}
+	config.Servers = helpers.ParseEnvSlice(prefixer("KAFKA_SERVERS"))
+	config.SecurityProtocol = prefixer("KAFKA_SECURITY_PROTOCOL")
+	config.Mechanism = prefixer("KAFKA_MECHANISM")
+	config.User = prefixer("KAFKA_USER")
+	config.Password = prefixer("KAFKA_PASSWORD")
+	config.SslCaLocation = prefixer("KAFKA_SSL_CA_LOCATION")
+	config.SslLocation = prefixer("KAFKA_SSL_LOCATION")
+	config.SslKeyLocation = prefixer("KAFKA_SSL_KEY_LOCATION")
+	config.KeytabPath = prefixer("KAFKA_KEYTAB_PATH")
+	config.Principal = prefixer("KAFKA_PRINCIPAL")
+	return config
+}
 
-	config.Kafka.Servers = helpers.ParseEnvSlice(prefixer("KAFKA_SERVERS"))
-	config.Kafka.SecurityProtocol = prefixer("KAFKA_SECURITY_PROTOCOL")
-	config.Kafka.Mechanism = prefixer("KAFKA_MECHANISM")
-	config.Kafka.User = prefixer("KAFKA_USER")
-	config.Kafka.Password = prefixer("KAFKA_PASSWORD")
-	config.Kafka.SslCaLocation = prefixer("KAFKA_SSL_CA_LOCATION")
-	config.Kafka.SslLocation = prefixer("KAFKA_SSL_LOCATION")
-	config.Kafka.SslKeyLocation = prefixer("KAFKA_SSL_KEY_LOCATION")
-	config.Kafka.KeytabPath = prefixer("KAFKA_KEYTAB_PATH")
-	config.Kafka.Principal = prefixer("KAFKA_PRINCIPAL")
-
-	config.Redis.Addresses = helpers.ParseEnvSlice(prefixer("REDIS_ADDRESSES"))
-	config.Redis.Username = prefixer("REDIS_USERNAME")
-	config.Redis.Password = prefixer("REDIS_PASSWORD")
-	config.Redis.Mode = prefixer("REDIS_MODE")
-	config.Redis.Db = 0
+func NewEnvRedisConfig(prefix string) *EnvRedisConfig {
+	var prefixer = newEnvPrefixer(prefix)
+	var config = &EnvRedisConfig{}
+	config.Addresses = helpers.ParseEnvSlice(prefixer("REDIS_ADDRESSES"))
+	config.Username = prefixer("REDIS_USERNAME")
+	config.Password = prefixer("REDIS_PASSWORD")
+	config.Mode = prefixer("REDIS_MODE")
+	config.Db = 0
 	var redisDb = helpers.ParseEnvInt(prefixer("REDIS_DB"))
 	if redisDb != nil {
-		config.Redis.Db = *redisDb
+		config.Db = *redisDb
 	}
-	config.Redis.Master = prefixer("REDIS_MASTER")
+	config.Master = prefixer("REDIS_MASTER")
+	return config
+}
 
-	config.Postgres.Connection = prefixer("POSTGRES_CONNECTION")
-	config.ClickHouse.Connection = prefixer("CLICKHOUSE_CONNECTION")
+func NewEnvPostgresConfig(prefix string) *EnvPostgresConfig {
+	var prefixer = newEnvPrefixer(prefix)
+	var config = &EnvPostgresConfig{}
+	config.Connection = prefixer("POSTGRES_CONNECTION")
+	return config
+}
 
-	config.System.Port = 3000
+func NewEnvClickHouseConfig(prefix string) *EnvClickHouseConfig {
+	var prefixer = newEnvPrefixer(prefix)
+	var config = &EnvClickHouseConfig{}
+	config.Connection = prefixer("CLICKHOUSE_CONNECTION")
+	return config
+}
+
+func NewEnvSystemConfig(prefix string) *EnvSystemConfig {
+	var prefixer = newEnvPrefixer(prefix)
+	var config = &EnvSystemConfig{}
+	config.Port = 3000
 	var port = helpers.ParseEnvInt(prefixer("PORT"))
 	if port != nil {
-		config.System.Port = *port
+		config.Port = *port
 	}
 	var logLevel = strings.ToLower(prefixer("LOG_LEVEL"))
 	switch logLevel {
 	case "debug":
-		config.System.LogLevel = slog.LevelDebug
+		config.LogLevel = slog.LevelDebug
 	case "info":
-		config.System.LogLevel = slog.LevelInfo
+		config.LogLevel = slog.LevelInfo
 	case "warn":
-		config.System.LogLevel = slog.LevelWarn
+		config.LogLevel = slog.LevelWarn
 	case "error":
-		config.System.LogLevel = slog.LevelError
+		config.LogLevel = slog.LevelError
 	default:
-		config.System.LogLevel = slog.LevelInfo
+		config.LogLevel = slog.LevelInfo
 
 	}
-	config.System.LogColor = helpers.ParseEnvBool(prefixer("LOG_COLOR"))
-	config.System.CompressRequest = helpers.ParseEnvBool(prefixer("COMPRESS_REQUEST"))
-	config.System.OtlpExporterURL = prefixer("OTLP_EXPORTER_URL")
-	config.System.OtlpExporterProtocol = prefixer("OTLP_PROTOCOL")
+	config.LogColor = helpers.ParseEnvBool(prefixer("LOG_COLOR"))
+	config.CompressRequest = helpers.ParseEnvBool(prefixer("COMPRESS_REQUEST"))
+	config.OtlpExporterURL = prefixer("OTLP_EXPORTER_URL")
+	config.OtlpExporterProtocol = prefixer("OTLP_PROTOCOL")
 	return config
 }
 
