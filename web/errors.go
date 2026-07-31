@@ -42,6 +42,7 @@ func SendError(w http.ResponseWriter, res ErrorResponse) {
 			Status:  status,
 		})
 	case ERROR_RESPONSE_TYPE_PLAIN:
+		w.WriteHeader(status)
 		w.Write([]byte(res.Message))
 	}
 }
