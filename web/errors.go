@@ -7,11 +7,19 @@ import (
 )
 
 type ErrorResponse struct {
+	Type    ErrorResponseType
 	Message string
 	Code    int
 	Status  int
 	Error   error
 }
+
+type ErrorResponseType = uint8
+
+const (
+	ERROR_RESPONSE_TYPE_JSON ErrorResponseType = iota
+	ERROR_RESPONSE_TYPE_PLAIN
+)
 
 func SendError(w http.ResponseWriter, res ErrorResponse) {
 	if res.Error != nil {
@@ -23,14 +31,19 @@ func SendError(w http.ResponseWriter, res ErrorResponse) {
 	if res.Status != 0 {
 		status = res.Status
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(Response{
-		Message: res.Message,
-		Code:    res.Code,
-		Status:  status,
-	})
 
+	switch res.Type {
+	case ERROR_RESPONSE_TYPE_JSON:
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		json.NewEncoder(w).Encode(Response{
+			Message: res.Message,
+			Code:    res.Code,
+			Status:  status,
+		})
+	case ERROR_RESPONSE_TYPE_PLAIN:
+		w.Write([]byte(res.Message))
+	}
 }
 
 func NotAuthorized(w http.ResponseWriter) {
