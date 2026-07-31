@@ -37,6 +37,7 @@ func NewMiddleware(opts *MiddlewareOptions) func(next http.Handler) http.Handler
 				if writer.Status() != 0 {
 					status = writer.Status()
 				}
+				attrs = append(attrs, writer.GetLogAttrs()...)
 				attrs = append(attrs, slog.Int("status", status))
 				if status >= 400 && status < 500 {
 					logLevel = slog.LevelWarn

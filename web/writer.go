@@ -2,6 +2,7 @@ package web
 
 import (
 	"compress/gzip"
+	"log/slog"
 	"net/http"
 	"strings"
 )
@@ -56,6 +57,7 @@ type MiddlewarePanic struct {
 type ResponseWriter struct {
 	panic          *MiddlewarePanic
 	err            error
+	logAttrs       []slog.Attr
 	compressWriter *gzip.Writer
 	originalWriter http.ResponseWriter
 	status         int
@@ -149,4 +151,12 @@ func (g *ResponseWriter) SetPanic(err error, stack []byte) {
 
 func (g *ResponseWriter) GetPanic() *MiddlewarePanic {
 	return g.panic
+}
+
+func (g *ResponseWriter) AddLogAttrs(attrs ...slog.Attr) {
+	g.logAttrs = append(g.logAttrs, attrs...)
+}
+
+func (g *ResponseWriter) GetLogAttrs() []slog.Attr {
+	return g.logAttrs
 }
