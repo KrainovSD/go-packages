@@ -1,6 +1,7 @@
 package web
 
 import (
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
@@ -82,30 +83,44 @@ type Query struct {
 	Value string `json:"value"`
 }
 
-func ParseRawQuery(rawQuery string) []Query {
-	if rawQuery == "" {
-		return nil
+var defaultMaxQueries = 10000
+
+func ParseQuery(query string) ([]Query, error) {
+	var count = strings.Count(query, "&") + 1
+	if count > defaultMaxQueries {
+		return nil, errors.New("number of URL query parameters exceeded limit")
 	}
-	var parts = strings.Split(rawQuery, "&")
-	var result = make([]Query, 0, len(parts))
-	for _, part := range parts {
-		if part == "" {
+	var queries = make([]Query, 0, count)
+	var err error
+	for query != "" {
+		var key string
+		key, query, _ = strings.Cut(query, "&")
+		if strings.Contains(key, ";") {
+			err = errors.New("invalid semicolon separator in query")
 			continue
 		}
-		var key, value string
-		if idx := strings.IndexByte(part, '='); idx >= 0 {
-			key = part[:idx]
-			value = part[idx+1:]
-		} else {
-			key = part
+		if key == "" {
+			continue
 		}
-		if decodedKey, err := url.QueryUnescape(key); err == nil {
-			key = decodedKey
+		key, value, _ := strings.Cut(key, "=")
+		key, err1 := url.QueryUnescape(key)
+		if err1 != nil {
+			if err == nil {
+				err = err1
+			}
+			continue
 		}
-		if decodedValue, err := url.QueryUnescape(value); err == nil {
-			value = decodedValue
+		value, err1 = url.QueryUnescape(value)
+		if err1 != nil {
+			if err == nil {
+				err = err1
+			}
+			continue
 		}
-		result = append(result, Query{Key: key, Value: value})
+		queries = append(queries, Query{
+			Key:   key,
+			Value: value,
+		})
 	}
-	return result
+	return queries, err
 }
