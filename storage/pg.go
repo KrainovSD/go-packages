@@ -5,7 +5,9 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/shopspring/decimal"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -72,4 +74,20 @@ func (t *OtelPgxTracer) TraceQueryEnd(ctx context.Context, conn *pgx.Conn, data 
 		}
 		span.End()
 	}
+}
+
+type PGDecimal struct {
+	decimal.Decimal
+}
+
+func (d *PGDecimal) ScanNumeric(v pgtype.Numeric) error {
+	if !v.Valid || v.NaN || v.InfinityModifier != pgtype.Finite {
+		return nil
+	}
+	d.Decimal = decimal.NewFromBigInt(v.Int, v.Exp)
+	return nil
+}
+
+func (d PGDecimal) NumericValue() (pgtype.Numeric, error) {
+	return pgtype.Numeric{Int: d.Coefficient(), Exp: d.Exponent(), Valid: true}, nil
 }
