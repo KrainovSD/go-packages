@@ -21,6 +21,8 @@ type WriterMiddleware struct {
 	shouldCompress shouldCompress
 }
 
+const WriterMiddlewareID = "ksd-writer"
+
 func NewWriterMiddleware(opts *WriterMiddlewareOptions) func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -14,6 +14,7 @@ import (
 	"github.com/KrainovSD/go-packages/internal/modules/pg"
 	"github.com/KrainovSD/go-packages/queue"
 	"github.com/KrainovSD/go-packages/storage"
+	"github.com/KrainovSD/go-packages/web"
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
@@ -41,6 +42,7 @@ func main() {
 			MaxHeaderBytes:    1 << 20,
 			CompressRequest:   conf.Default.System.CompressRequest,
 			ShouldCompress:    nil,
+			BodySizeLimit:     1 << 20,
 		},
 		Observability: &app.ObservabilityConfig{
 			LogLevel:        conf.Default.System.LogLevel,
@@ -51,14 +53,26 @@ func main() {
 			Pprof:           false,
 		},
 	})
-	server.Mux().ExtendMiddlewareGroup(
-		"full",
-		"test",
-		[]app.MuxMiddleware{
-			middlewares.NewAuth(middlewares.AuthOptions{Strict: true}),
-			middlewares.NewLogger(middlewares.LoggerOptions{Strict: true}),
+
+	var mux = server.Mux().Clone()
+	mux.PushMiddlewares([]app.MuxMiddleware{
+		app.MuxMiddleware{
+			ID: "auth",
+			Fn: middlewares.NewAuth(middlewares.AuthOptions{Strict: true}),
 		},
+		app.MuxMiddleware{
+			ID: "logger",
+			Fn: middlewares.NewLogger(middlewares.LoggerOptions{Strict: true}),
+		},
+	})
+	var staticMux = mux.CloneWith(
+		mux.SelectMiddlewares([]string{
+			web.WriterMiddlewareID,
+			web.SizeLimitMiddlewareID,
+			web.GoalkeeperMiddlewareID,
+		}),
 	)
+
 	server.Hooks().OnPreStartup(func(startupCtx context.Context) (func(shutdownCtx context.Context), error) {
 		var db *pgxpool.Pool
 		if db, err = storage.NewPostgres(startupCtx, &storage.PostgresOptions{Connection: conf.Default.Postgres.Connection, Tracing: server.Traces.Exist()}); err != nil {
@@ -114,9 +128,9 @@ func main() {
 			ShutdownSignal: server.ShutdownSignal(),
 		}
 		if err = router.InitRoutes(&router.RoutesOptions{
-			M:      server.Mux().FullMiddlewares(),
-			SM:     server.Mux().BaseMiddlewares(),
-			TM:     server.Mux().WithMiddlewares("test"),
+			M:      server.Mux(),
+			SM:     staticMux,
+			TM:     mux,
 			Cradle: cradle,
 		}); err != nil {
 			return nil, err

@@ -22,7 +22,7 @@ type App struct {
 	Logger               *slog.Logger
 	Traces               *traces.Provider
 	Metrics              *metrics.Provider
-	mux                  *GlobalMux
+	mux                  *Mux
 	hooks                *Hooks
 	server               *http.Server
 	config               *Config
@@ -71,28 +71,48 @@ func New(config *Config) *App {
 			Key:           config.Observability.LogTraceIDKey,
 		}))
 	}
-	var writerMiddleware = web.NewWriterMiddleware(&web.WriterMiddlewareOptions{
-		Compress:       config.Server.CompressRequest,
-		CompressLevel:  gzip.DefaultCompression,
-		ShouldCompress: config.Server.ShouldCompress,
-	})
-	var tracesMiddleware = traces.NewMiddleware(&traces.MiddlewareOptions{
-		Traces:        traceProvider,
-		ExcludeStatic: true,
-	})
-	var metricsMiddleware = metrics.NewMiddleware(&metrics.MiddlewareOptions{
-		Metrics: metricProvider,
-	})
-	var loggerMiddleware = logs.NewMiddleware(&logs.MiddlewareOptions{
-		Log:           logger,
-		ExcludeStatic: true,
-	})
-	var goalkeeperMiddleware = web.NewGoalkeeperMiddleware()
-	var middlewares = make(map[string][]MuxMiddleware, 2)
-	middlewares["base"] = []MuxMiddleware{writerMiddleware, goalkeeperMiddleware}
-	middlewares["full"] = []MuxMiddleware{writerMiddleware, tracesMiddleware, metricsMiddleware, loggerMiddleware, goalkeeperMiddleware}
 	var hooks = newHooks()
-	var mux = newMux(middlewares)
+	var mux = &Mux{
+		mux: &http.ServeMux{},
+		middlewares: []MuxMiddleware{
+			MuxMiddleware{
+				ID: web.WriterMiddlewareID,
+				Fn: web.NewWriterMiddleware(&web.WriterMiddlewareOptions{
+					Compress:       config.Server.CompressRequest,
+					CompressLevel:  gzip.DefaultCompression,
+					ShouldCompress: config.Server.ShouldCompress,
+				}),
+			},
+			MuxMiddleware{
+				ID: traces.MiddlewareID,
+				Fn: traces.NewMiddleware(&traces.MiddlewareOptions{
+					Traces:        traceProvider,
+					ExcludeStatic: true,
+				}),
+			},
+			MuxMiddleware{
+				ID: metrics.MiddlewareID,
+				Fn: metrics.NewMiddleware(&metrics.MiddlewareOptions{
+					Metrics: metricProvider,
+				}),
+			},
+			MuxMiddleware{
+				ID: logs.MiddlewareID,
+				Fn: logs.NewMiddleware(&logs.MiddlewareOptions{
+					Log:           logger,
+					ExcludeStatic: true,
+				}),
+			},
+			MuxMiddleware{
+				ID: web.SizeLimitMiddlewareID,
+				Fn: web.NewSizeLimitMiddleware(config.Server.BodySizeLimit),
+			},
+			MuxMiddleware{
+				ID: web.GoalkeeperMiddlewareID,
+				Fn: web.NewGoalkeeperMiddleware(),
+			},
+		},
+	}
 	var shutdownSignal, cancelShutdownSignal = context.WithCancel(context.Background())
 	return &App{
 		Logger:  logger,
@@ -124,7 +144,7 @@ func (a *App) ShutdownSignal() context.Context {
 	return a.shutdownSignal
 }
 
-func (a *App) Mux() *GlobalMux {
+func (a *App) Mux() *Mux {
 	return a.mux
 }
 

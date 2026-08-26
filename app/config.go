@@ -15,32 +15,12 @@ type Config struct {
 	Observability   *ObservabilityConfig
 }
 
-type ServerConfig struct {
-	Port              int
-	ReadTimeout       time.Duration
-	WriteTimeout      time.Duration
-	IdleTimeout       time.Duration
-	ReadHeaderTimeout time.Duration
-	MaxHeaderBytes    int
-	CompressRequest   bool
-	ShouldCompress    func(w http.ResponseWriter) bool
-}
-
-type ObservabilityConfig struct {
-	LogLevel        slog.Level
-	LogColor        bool
-	LogTraceIDKey   string
-	OtlpExporterURL string
-	OtlpProtocol    string
-	Pprof           bool
-}
-
 func (config *Config) setDefaults() {
 	if config.ServiceName == "" {
 		config.ServiceName = "ksd-golang-app"
 	}
 	if config.ServiceVersion == "" {
-		config.ServiceVersion = "0.0.0"
+		config.ServiceVersion = "0.0.1"
 	}
 	if config.StartupTimeout == 0 {
 		config.StartupTimeout = 30 * time.Second
@@ -56,6 +36,18 @@ func (config *Config) setDefaults() {
 		config.Observability = &ObservabilityConfig{}
 	}
 	config.Observability.setDefaults()
+}
+
+type ServerConfig struct {
+	Port              int
+	ReadTimeout       time.Duration
+	WriteTimeout      time.Duration
+	IdleTimeout       time.Duration
+	ReadHeaderTimeout time.Duration
+	MaxHeaderBytes    int
+	CompressRequest   bool
+	ShouldCompress    func(w http.ResponseWriter) bool
+	BodySizeLimit     int64
 }
 
 func (config *ServerConfig) setDefaults() {
@@ -77,6 +69,18 @@ func (config *ServerConfig) setDefaults() {
 	if config.MaxHeaderBytes == 0 {
 		config.MaxHeaderBytes = 1 << 20
 	}
+	if config.BodySizeLimit == 0 {
+		config.BodySizeLimit = 5 << 20
+	}
+}
+
+type ObservabilityConfig struct {
+	LogLevel        slog.Level
+	LogColor        bool
+	LogTraceIDKey   string
+	OtlpExporterURL string
+	OtlpProtocol    string
+	Pprof           bool
 }
 
 func (config *ObservabilityConfig) setDefaults() {
