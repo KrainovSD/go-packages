@@ -3,16 +3,18 @@ package app
 import (
 	"log/slog"
 	"net/http"
+	"runtime"
 	"time"
 )
 
 type Config struct {
-	ServiceName     string
-	ServiceVersion  string
-	StartupTimeout  time.Duration
-	ShutdownTimeout time.Duration
-	Server          *ServerConfig
-	Observability   *ObservabilityConfig
+	ServiceName      string
+	ServiceVersion   string
+	StartupTimeout   time.Duration
+	ShutdownTimeout  time.Duration
+	BackgroundWorker *BackgroundWorkerConfig
+	Server           *ServerConfig
+	Observability    *ObservabilityConfig
 }
 
 func (config *Config) setDefaults() {
@@ -28,6 +30,10 @@ func (config *Config) setDefaults() {
 	if config.ShutdownTimeout == 0 {
 		config.ShutdownTimeout = 20 * time.Second
 	}
+	if config.BackgroundWorker == nil {
+		config.BackgroundWorker = &BackgroundWorkerConfig{}
+	}
+	config.BackgroundWorker.setDefaults()
 	if config.Server == nil {
 		config.Server = &ServerConfig{}
 	}
@@ -36,6 +42,21 @@ func (config *Config) setDefaults() {
 		config.Observability = &ObservabilityConfig{}
 	}
 	config.Observability.setDefaults()
+}
+
+type BackgroundWorkerConfig struct {
+	Capacity int
+	Workers  int
+	OnPanic  func(any)
+}
+
+func (config *BackgroundWorkerConfig) setDefaults() {
+	if config.Capacity == 0 {
+		config.Capacity = 64
+	}
+	if config.Workers == 0 {
+		config.Workers = runtime.NumCPU()
+	}
 }
 
 type ServerConfig struct {

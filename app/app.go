@@ -117,7 +117,7 @@ func New(config *Config) *App {
 		Logger:   logger,
 		Traces:   traceProvider,
 		Metrics:  metricProvider,
-		BgWorker: NewBackgroundWorker(24, 12, nil),
+		BgWorker: NewBackgroundWorker(config.BackgroundWorker.Capacity, config.BackgroundWorker.Workers, config.BackgroundWorker.OnPanic),
 		hooks:    hooks,
 		config:   config,
 		mux:      mux,

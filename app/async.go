@@ -6,14 +6,14 @@ import (
 	"time"
 )
 
-type BackgroundTask struct {
+type backgroundTask struct {
 	Fn      func(ctx context.Context)
 	Ctx     context.Context
 	Timeout time.Duration
 }
 
 type BackgroundWorker struct {
-	tasks   chan BackgroundTask
+	tasks   chan backgroundTask
 	workers sync.WaitGroup
 	onPanic func(any)
 	mu      sync.RWMutex
@@ -22,7 +22,7 @@ type BackgroundWorker struct {
 
 func NewBackgroundWorker(capacity int, workers int, onPanic func(any)) *BackgroundWorker {
 	var bg = &BackgroundWorker{
-		tasks:   make(chan BackgroundTask, capacity),
+		tasks:   make(chan backgroundTask, capacity),
 		onPanic: onPanic,
 	}
 	for range workers {
@@ -36,7 +36,7 @@ func NewBackgroundWorker(capacity int, workers int, onPanic func(any)) *Backgrou
 
 }
 
-func (bg *BackgroundWorker) run(task BackgroundTask) {
+func (bg *BackgroundWorker) run(task backgroundTask) {
 	defer func() {
 		if value := recover(); value != nil {
 			if bg.onPanic != nil {
@@ -55,13 +55,17 @@ func (bg *BackgroundWorker) run(task BackgroundTask) {
 	task.Fn(ctx)
 }
 
-func (bg *BackgroundWorker) Do(task BackgroundTask) bool {
+func (bg *BackgroundWorker) Do(ctx context.Context, fn func(ctx context.Context), timeout time.Duration) bool {
 	bg.mu.RLock()
 	defer bg.mu.RUnlock()
 	if bg.stopped {
 		return false
 	}
-	bg.tasks <- task
+	bg.tasks <- backgroundTask{
+		Ctx:     ctx,
+		Fn:      fn,
+		Timeout: timeout,
+	}
 	return true
 }
 
