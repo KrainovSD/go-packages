@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
-	"sync"
 	"syscall"
 
 	"github.com/KrainovSD/go-packages/logs"
@@ -22,11 +21,11 @@ type App struct {
 	Logger               *slog.Logger
 	Traces               *traces.Provider
 	Metrics              *metrics.Provider
+	BgWorker             *BackgroundWorker
 	mux                  *Mux
 	hooks                *Hooks
 	server               *http.Server
 	config               *Config
-	wg                   *sync.WaitGroup
 	shutdownSignal       context.Context
 	cancelShutdownSignal func()
 }
@@ -115,12 +114,13 @@ func New(config *Config) *App {
 	}
 	var shutdownSignal, cancelShutdownSignal = context.WithCancel(context.Background())
 	return &App{
-		Logger:  logger,
-		Traces:  traceProvider,
-		Metrics: metricProvider,
-		hooks:   hooks,
-		config:  config,
-		mux:     mux,
+		Logger:   logger,
+		Traces:   traceProvider,
+		Metrics:  metricProvider,
+		BgWorker: NewBackgroundWorker(24, 12, nil),
+		hooks:    hooks,
+		config:   config,
+		mux:      mux,
 		server: &http.Server{
 			Addr:              ":" + strconv.Itoa(config.Server.Port),
 			Handler:           mux.mux,
@@ -130,14 +130,9 @@ func New(config *Config) *App {
 			ReadHeaderTimeout: config.Server.ReadHeaderTimeout,
 			MaxHeaderBytes:    config.Server.MaxHeaderBytes,
 		},
-		wg:                   &sync.WaitGroup{},
 		shutdownSignal:       shutdownSignal,
 		cancelShutdownSignal: cancelShutdownSignal,
 	}
-}
-
-func (a *App) ShutdownWait() *sync.WaitGroup {
-	return a.wg
 }
 
 func (a *App) ShutdownSignal() context.Context {
@@ -188,7 +183,7 @@ func (a *App) Start() {
 		a.server.Close()
 	}
 	a.cancelShutdownSignal()
-	a.wg.Wait()
+	a.BgWorker.Stop()
 	var cleanup = a.hooks.cleanup
 	for _, clean := range cleanup {
 		var ctx, cancel = context.WithTimeout(context.Background(), a.config.ShutdownTimeout)
@@ -216,7 +211,7 @@ func (a *App) preStartup() {
 func (a *App) postStartup() {
 	var err error
 	for _, fn := range a.hooks.onPostStartup {
-		if err = fn(a.shutdownSignal, a.wg); err != nil {
+		if err = fn(a.shutdownSignal); err != nil {
 			panic(err)
 		}
 	}

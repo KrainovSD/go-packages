@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	"github.com/KrainovSD/go-packages/api"
 	"github.com/KrainovSD/go-packages/app"
@@ -124,7 +123,7 @@ func main() {
 			Db:             db,
 			Redis:          red,
 			Queue:          kq,
-			Wg:             server.ShutdownWait(),
+			Wg:             server.BgWorker,
 			ShutdownSignal: server.ShutdownSignal(),
 		}
 		if err = router.InitRoutes(&router.RoutesOptions{
@@ -142,7 +141,7 @@ func main() {
 			fetch.Close()
 		}, nil
 	})
-	server.Hooks().OnPostStartup(func(shutdownSignal context.Context, wg *sync.WaitGroup) error {
+	server.Hooks().OnPostStartup(func(shutdownSignal context.Context) error {
 		fmt.Println("Server started on", conf.Default.System.Port)
 		return nil
 	})

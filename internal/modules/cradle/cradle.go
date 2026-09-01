@@ -3,9 +3,9 @@ package cradle
 import (
 	"context"
 	"log/slog"
-	"sync"
 
 	"github.com/KrainovSD/go-packages/api"
+	"github.com/KrainovSD/go-packages/app"
 	"github.com/KrainovSD/go-packages/internal/config"
 	"github.com/KrainovSD/go-packages/metrics"
 	"github.com/KrainovSD/go-packages/traces"
@@ -23,6 +23,6 @@ type Cradle struct {
 	Db             *pgxpool.Pool
 	Redis          redis.UniversalClient
 	Queue          *kafka.Producer
-	Wg             *sync.WaitGroup
+	Wg             *app.BackgroundWorker
 	ShutdownSignal context.Context
 }

@@ -2,11 +2,10 @@ package app
 
 import (
 	"context"
-	"sync"
 )
 
 type hookOnPreStartup = func(startupCtx context.Context) (func(shutdownCtx context.Context), error)
-type hookOnPostStartup = func(shutdownSignal context.Context, wg *sync.WaitGroup) error
+type hookOnPostStartup = func(shutdownSignal context.Context) error
 type hookOnPreShutdown = func(shutdownCtx context.Context)
 type hookOnPostShutdown = func(shutdownCtx context.Context)
 type hooksCleanup = func(shutdownCtx context.Context)
@@ -36,7 +35,7 @@ func (h *Hooks) OnPreStartup(handler func(startupCtx context.Context) (func(shut
 	h.onPreStartup = append(h.onPreStartup, handler)
 }
 
-func (h *Hooks) OnPostStartup(handler func(shutdownSignal context.Context, wg *sync.WaitGroup) error) {
+func (h *Hooks) OnPostStartup(handler func(shutdownSignal context.Context) error) {
 	if handler == nil {
 		return
 	}
