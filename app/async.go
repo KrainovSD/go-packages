@@ -55,6 +55,16 @@ func (bg *BackgroundWorker) run(task backgroundTask) {
 	task.Fn(ctx)
 }
 
+func (bg *BackgroundWorker) Stop() {
+	bg.mu.Lock()
+	if !bg.stopped {
+		bg.stopped = true
+		close(bg.tasks)
+	}
+	bg.mu.Unlock()
+	bg.workers.Wait()
+}
+
 func (bg *BackgroundWorker) Do(ctx context.Context, fn func(ctx context.Context), timeout time.Duration) bool {
 	bg.mu.RLock()
 	defer bg.mu.RUnlock()
@@ -69,12 +79,6 @@ func (bg *BackgroundWorker) Do(ctx context.Context, fn func(ctx context.Context)
 	return true
 }
 
-func (bg *BackgroundWorker) Stop() {
-	bg.mu.Lock()
-	if !bg.stopped {
-		bg.stopped = true
-		close(bg.tasks)
-	}
-	bg.mu.Unlock()
-	bg.workers.Wait()
+func (bg *BackgroundWorker) Go(fn func()) {
+	bg.workers.Go(fn)
 }
