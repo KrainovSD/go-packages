@@ -23,14 +23,26 @@ type WriterMiddleware struct {
 
 const WriterMiddlewareID = "ksd-writer"
 
+func shouldCompressFn(w http.ResponseWriter) bool {
+	var contentType = w.Header()["Content-Type"]
+	if len(contentType) == 0 {
+		return false
+	}
+	return contentType[0] == "application/json"
+}
+
 func NewWriterMiddleware(opts *WriterMiddlewareOptions) func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var shouldCompress = shouldCompressFn
+			if opts.ShouldCompress != nil {
+				shouldCompress = opts.ShouldCompress
+			}
 			var writer = NewResponseWriter(&ResponseWriterOptions{
 				OriginalWriter: w,
-				Compress:       opts.Compress && canCompress(w.Header()),
+				Compress:       opts.Compress && canCompress(r.Header),
 				CompressLevel:  opts.CompressLevel,
-				ShouldCompress: opts.ShouldCompress,
+				ShouldCompress: shouldCompress,
 			})
 			next.ServeHTTP(writer, r)
 			if writer, ok := writer.(*ResponseWriter); ok {
@@ -108,8 +120,9 @@ func (g *ResponseWriter) WriteHeader(statusCode int) {
 	if g.Written() {
 		return
 	}
-	if g.compress && (g.shouldCompress == nil || g.shouldCompress(g)) {
+	if g.compress && g.shouldCompress(g) {
 		g.SetGzipWriter()
+		g.originalWriter.Header().Del("Content-Length")
 		g.originalWriter.Header().Set("Content-Encoding", "gzip")
 		g.originalWriter.Header().Set("Vary", "Accept-Encoding")
 	}
