@@ -98,6 +98,7 @@ type Request struct {
 
 type Response struct {
 	*http.Response
+	cancel context.CancelFunc
 }
 
 func (c *Client) Send(request Request) (*Response, error) {
@@ -106,13 +107,15 @@ func (c *Client) Send(request Request) (*Response, error) {
 	if request.Ctx != nil {
 		ctx = request.Ctx
 	}
+	var cancel context.CancelFunc
 	if request.Timeout != 0 {
-		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, request.Timeout)
-		defer cancel()
 	}
 	var requestUrl *url.URL
 	if requestUrl, err = url.Parse(request.Url); err != nil {
+		if cancel != nil {
+			cancel()
+		}
 		return nil, fmt.Errorf("parse url %s: %w", request.Url, err)
 	}
 	if len(request.Queries) > 0 {
@@ -126,6 +129,9 @@ func (c *Client) Send(request Request) (*Response, error) {
 	}
 	var req *http.Request
 	if req, err = http.NewRequestWithContext(ctx, string(request.Method), requestUrl.String(), request.Body); err != nil {
+		if cancel != nil {
+			cancel()
+		}
 		return nil, fmt.Errorf("create request host %s, path %s: %w", requestUrl.Host, requestUrl.Path, err)
 	}
 	if request.ContentLength != 0 {
@@ -141,13 +147,36 @@ func (c *Client) Send(request Request) (*Response, error) {
 	}
 	var res *http.Response
 	if res, err = c.client.Do(req); err != nil {
+		if cancel != nil {
+			cancel()
+		}
 		return nil, fmt.Errorf("do request host %s, path %s: %w", requestUrl.Host, requestUrl.Path, err)
 	}
 	if request.Debug {
 		fmt.Printf("request: %s, status: %d", requestUrl.String(), res.StatusCode)
 	}
-	return &Response{Response: res}, nil
+	return &Response{Response: res, cancel: cancel}, nil
 
+}
+
+func (r *Response) Read(maxSize int64) ([]byte, error) {
+	var content []byte
+	var err error
+	var reader io.ReadCloser = r.Body
+	if maxSize > 0 {
+		reader = http.MaxBytesReader(nil, reader, maxSize)
+	}
+	if content, err = io.ReadAll(reader); err != nil {
+		return nil, fmt.Errorf("read request host %s, path %s: %w", r.Request.URL.Host, r.Request.URL.Path, err)
+	}
+	return content, nil
+}
+
+func (r *Response) Close() {
+	r.Body.Close()
+	if r.cancel != nil {
+		r.cancel()
+	}
 }
 
 type RequestWithRead struct {
@@ -182,21 +211,4 @@ func (r *Client) SendWithRead(req RequestWithRead) (*ResponseWithRead, error) {
 		Data:     data,
 	}, nil
 
-}
-
-func (r *Response) Read(maxSize int64) ([]byte, error) {
-	var content []byte
-	var err error
-	var reader io.ReadCloser = r.Body
-	if maxSize > 0 {
-		reader = http.MaxBytesReader(nil, reader, maxSize)
-	}
-	if content, err = io.ReadAll(reader); err != nil {
-		return nil, fmt.Errorf("read request host %s, path %s: %w", r.Request.URL.Host, r.Request.URL.Path, err)
-	}
-	return content, nil
-}
-
-func (r *Response) Close() {
-	r.Body.Close()
 }
