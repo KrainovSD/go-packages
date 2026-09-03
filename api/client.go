@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -146,6 +147,40 @@ func (c *Client) Send(request Request) (*Response, error) {
 		fmt.Printf("request: %s, status: %d", requestUrl.String(), res.StatusCode)
 	}
 	return &Response{Response: res}, nil
+
+}
+
+type RequestWithRead struct {
+	Request
+	IsBadStatus func(status int) bool
+	MaxSize     int64
+}
+
+type ResponseWithRead struct {
+	*http.Response
+	Data []byte
+}
+
+var ErrBadStatusCode = errors.New("bad status code")
+
+func (r *Client) SendWithRead(req RequestWithRead) (*ResponseWithRead, error) {
+	var err error
+	var res *Response
+	if res, err = r.Send(req.Request); err != nil {
+		return nil, err
+	}
+	defer res.Close()
+	var data []byte
+	if data, err = res.Read(req.MaxSize); err != nil {
+		return nil, err
+	}
+	if (req.IsBadStatus == nil && res.StatusCode >= 400) || (req.IsBadStatus != nil && req.IsBadStatus(res.StatusCode)) {
+		return nil, fmt.Errorf("%w: %d, host %s, path %s", ErrBadStatusCode, res.StatusCode, res.Request.URL.Host, res.Request.URL.Path)
+	}
+	return &ResponseWithRead{
+		Response: res.Response,
+		Data:     data,
+	}, nil
 
 }
 
