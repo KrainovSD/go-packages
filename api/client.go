@@ -2,12 +2,10 @@ package api
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
-	"strconv"
 	"time"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -16,43 +14,25 @@ import (
 type RequestMethod string
 
 const (
-	METHOD_GET     RequestMethod = "GET"
-	METHOD_POST                  = "POST"
-	METHOD_DELETE                = "DELETE"
-	METHOD_PUT                   = "PUT"
-	METHOD_PATCH                 = "PATCH"
-	METHOD_OPTIONS               = "OPTIONS"
+	MethodGet     RequestMethod = http.MethodGet
+	MethodPost    RequestMethod = http.MethodPost
+	MethodDelete  RequestMethod = http.MethodDelete
+	MethodPut     RequestMethod = http.MethodPut
+	MethodPatch   RequestMethod = http.MethodPatch
+	MethodOptions RequestMethod = http.MethodOptions
 )
 
 type RequestContentType string
 
 const (
-	CONTENT_TYPE_JSON   RequestContentType = "application/json"
-	CONTENT_TYPE_TEXT                      = "text/plain"
-	CONTENT_TYPE_FORM                      = "application/x-www-form-urlencoded"
-	CONTENT_TYPE_STREAM                    = "application/octet-stream"
+	ContentTypeJSON   RequestContentType = "application/json"
+	ContentTypeText   RequestContentType = "text/plain"
+	ContentTypeForm   RequestContentType = "application/x-www-form-urlencoded"
+	ContentTypeStream RequestContentType = "application/octet-stream"
 )
 
 type Client struct {
 	client *http.Client
-}
-type Request struct {
-	Url         string
-	Queries     map[string][]string
-	Headers     map[string]string
-	Method      RequestMethod
-	ContentType RequestContentType
-	Body        io.Reader
-	Ctx         context.Context
-	Timeout     time.Duration
-	MaxSize     int64
-	Debug       bool
-	NoRedirect  bool // affect a new api client to be created on each request
-}
-type Response struct {
-	Data   []byte
-	Status int
-	Header http.Header
 }
 
 type ClientOptions struct {
@@ -60,6 +40,7 @@ type ClientOptions struct {
 	Timeout             time.Duration
 	MaxIdleConns        int
 	MaxIdleConnsPerHost int
+	NoRedirect          bool
 }
 
 func NewClient(opts *ClientOptions) (*Client, error) {
@@ -80,6 +61,11 @@ func NewClient(opts *ClientOptions) (*Client, error) {
 		Timeout:   opts.Timeout,
 		Transport: transport,
 	}
+	if opts.NoRedirect {
+		client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
+	}
 	if opts.Tracing {
 		client.Transport = otelhttp.NewTransport(transport)
 	}
@@ -96,7 +82,24 @@ func (c *Client) Close() {
 	c.client.CloseIdleConnections()
 }
 
-func (c *Client) Send(request Request) (Response, error) {
+type Request struct {
+	Url           string
+	Queries       map[string][]string
+	Headers       map[string]string
+	Method        RequestMethod
+	ContentType   RequestContentType
+	ContentLength int64
+	Body          io.Reader
+	Ctx           context.Context
+	Timeout       time.Duration
+	Debug         bool
+}
+
+type Response struct {
+	*http.Response
+}
+
+func (c *Client) Send(request Request) (*Response, error) {
 	var err error
 	var ctx = context.Background()
 	if request.Ctx != nil {
@@ -107,10 +110,9 @@ func (c *Client) Send(request Request) (Response, error) {
 		ctx, cancel = context.WithTimeout(ctx, request.Timeout)
 		defer cancel()
 	}
-
 	var requestUrl *url.URL
 	if requestUrl, err = url.Parse(request.Url); err != nil {
-		return Response{}, fmt.Errorf("parse url %s: %w", request.Url, err)
+		return nil, fmt.Errorf("parse url %s: %w", request.Url, err)
 	}
 	if len(request.Queries) > 0 {
 		var queries = requestUrl.Query()
@@ -123,7 +125,10 @@ func (c *Client) Send(request Request) (Response, error) {
 	}
 	var req *http.Request
 	if req, err = http.NewRequestWithContext(ctx, string(request.Method), requestUrl.String(), request.Body); err != nil {
-		return Response{}, fmt.Errorf("create request url %s: %w", request.Url, err)
+		return nil, fmt.Errorf("create request host %s, path %s: %w", requestUrl.Host, requestUrl.Path, err)
+	}
+	if request.ContentLength != 0 {
+		req.ContentLength = request.ContentLength
 	}
 	if len(request.Headers) > 0 {
 		for k, v := range request.Headers {
@@ -133,47 +138,30 @@ func (c *Client) Send(request Request) (Response, error) {
 	if request.ContentType != "" {
 		req.Header.Add("Content-Type", string(request.ContentType))
 	}
-	var httpClient = c.client
-	if request.NoRedirect {
-		httpClient = &http.Client{
-			Timeout:   c.client.Timeout,
-			Transport: c.client.Transport,
-			CheckRedirect: func(req *http.Request, via []*http.Request) error {
-				return http.ErrUseLastResponse
-			},
-		}
-		defer httpClient.CloseIdleConnections()
-	}
 	var res *http.Response
-	if res, err = httpClient.Do(req); err != nil {
-		return Response{}, fmt.Errorf("do request url %s: %w", request.Url, err)
+	if res, err = c.client.Do(req); err != nil {
+		return nil, fmt.Errorf("do request host %s, path %s: %w", requestUrl.Host, requestUrl.Path, err)
 	}
 	if request.Debug {
 		fmt.Printf("request: %s, status: %d", requestUrl.String(), res.StatusCode)
 	}
-	defer res.Body.Close()
-	var maxSize = request.MaxSize
-	if maxSize == 0 {
-		maxSize = 50 << 20
-	}
+	return &Response{Response: res}, nil
+
+}
+
+func (r *Response) Read(maxSize int64) ([]byte, error) {
 	var content []byte
-	if content, err = io.ReadAll(io.LimitReader(res.Body, maxSize)); err != nil {
-		return Response{}, fmt.Errorf("read request url %s: %w", request.Url, err)
+	var err error
+	var reader io.ReadCloser = r.Body
+	if maxSize > 0 {
+		reader = http.MaxBytesReader(nil, reader, maxSize)
 	}
-
-	if res.StatusCode >= 400 {
-		err = errors.New("bad status code " + strconv.Itoa(res.StatusCode) + ". Description:" + string(content))
-		return Response{
-				Data:   content,
-				Status: res.StatusCode,
-				Header: res.Header,
-			},
-			fmt.Errorf("bad status request url %s: %w", request.Url, err)
+	if content, err = io.ReadAll(reader); err != nil {
+		return nil, fmt.Errorf("read request host %s, path %s: %w", r.Request.URL.Host, r.Request.URL.Path, err)
 	}
-	return Response{
-		Data:   content,
-		Status: res.StatusCode,
-		Header: res.Header,
-	}, nil
+	return content, nil
+}
 
+func (r *Response) Close() {
+	r.Body.Close()
 }

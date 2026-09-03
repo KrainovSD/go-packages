@@ -488,11 +488,11 @@ func (o *Oauth) getUser(ctx context.Context, token string) (User, error) {
 	var err error
 	var user User
 	var req *http.Request
-	if req, err = http.NewRequestWithContext(ctx, string(api.METHOD_POST), o.userInfoURL, nil); err != nil {
+	if req, err = http.NewRequestWithContext(ctx, string(api.MethodPost), o.userInfoURL, nil); err != nil {
 		return User{}, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Add("Authorization", "Bearer "+token)
-	req.Header.Add("Content-Type", string(api.CONTENT_TYPE_JSON))
+	req.Header.Add("Content-Type", string(api.ContentTypeJSON))
 	var res *http.Response
 	if res, err = o.http.Do(req); err != nil {
 		return User{}, fmt.Errorf("do request: %w", err)

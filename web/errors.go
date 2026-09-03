@@ -17,8 +17,8 @@ type ErrorResponse struct {
 type ErrorResponseType = uint8
 
 const (
-	ERROR_RESPONSE_TYPE_JSON ErrorResponseType = iota
-	ERROR_RESPONSE_TYPE_PLAIN
+	ErrorResponseTypeJSON ErrorResponseType = iota
+	ErrorResponseTypePlain
 )
 
 func SendError(w http.ResponseWriter, res ErrorResponse) {
@@ -33,7 +33,7 @@ func SendError(w http.ResponseWriter, res ErrorResponse) {
 	}
 
 	switch res.Type {
-	case ERROR_RESPONSE_TYPE_JSON:
+	case ErrorResponseTypeJSON:
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
 		json.NewEncoder(w).Encode(Response{
@@ -41,7 +41,7 @@ func SendError(w http.ResponseWriter, res ErrorResponse) {
 			Code:    res.Code,
 			Status:  status,
 		})
-	case ERROR_RESPONSE_TYPE_PLAIN:
+	case ErrorResponseTypePlain:
 		w.WriteHeader(status)
 		w.Write([]byte(res.Message))
 	}
