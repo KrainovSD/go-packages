@@ -23,12 +23,28 @@ type WriterMiddleware struct {
 
 const WriterMiddlewareID = "ksd-writer"
 
+var prefixes = [7]string{
+	"application/json",
+	"text/",
+	"application/javascript",
+	"image/svg+xml",
+	"application/xml",
+	"application/graphql",
+	"application/x-toml",
+}
+
 func shouldCompressFn(w http.ResponseWriter) bool {
 	var contentType = w.Header()["Content-Type"]
-	if len(contentType) == 0 {
+	if len(contentType) == 0 || contentType[0] == "" {
 		return false
 	}
-	return contentType[0] == "application/json"
+	var h = contentType[0]
+	for _, p := range prefixes {
+		if len(h) >= len(p) && h[:len(p)] == p {
+			return true
+		}
+	}
+	return false
 }
 
 func NewWriterMiddleware(opts *WriterMiddlewareOptions) func(next http.Handler) http.Handler {
@@ -52,7 +68,6 @@ func NewWriterMiddleware(opts *WriterMiddlewareOptions) func(next http.Handler) 
 			}
 		})
 	}
-
 }
 
 func canCompress(header http.Header) bool {
