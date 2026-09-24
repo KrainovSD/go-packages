@@ -47,7 +47,7 @@ func (config *Config) setDefaults() {
 type BackgroundWorkerConfig struct {
 	Capacity int
 	Workers  int
-	OnPanic  func(any)
+	OnPanic  func(err error, stack []byte, original any)
 }
 
 func (config *BackgroundWorkerConfig) setDefaults() {
@@ -102,6 +102,7 @@ type ObservabilityConfig struct {
 	OtlpExporterURL string
 	OtlpProtocol    string
 	Pprof           bool
+	Logger          *slog.Logger
 }
 
 func (config *ObservabilityConfig) setDefaults() {

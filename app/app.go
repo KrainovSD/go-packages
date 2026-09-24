@@ -37,10 +37,13 @@ func New(config *Config) *App {
 	}
 	var startupCtx, cancelStartupCtx = context.WithTimeout(context.Background(), config.StartupTimeout)
 	defer cancelStartupCtx()
-	var logger = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level:     config.Observability.LogLevel,
-		AddSource: false,
-	}))
+	var logger *slog.Logger = config.Observability.Logger
+	if config.Observability.Logger == nil {
+		logger = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+			Level:     config.Observability.LogLevel,
+			AddSource: false,
+		}))
+	}
 	var traceProvider = traces.NewProvider(startupCtx, &traces.ProviderOptions{
 		Url:      config.Observability.OtlpExporterURL,
 		Protocol: config.Observability.OtlpProtocol,
@@ -51,24 +54,26 @@ func New(config *Config) *App {
 		Service: config.ServiceName,
 		Logger:  logger,
 	})
-	if !config.Observability.LogColor {
-		logger = slog.New(logs.NewTraceHandler(&logs.TraceHandlerOptions{
-			Handler: slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-				Level:     config.Observability.LogLevel,
-				AddSource: false,
-			}),
-			TraceProvider: traceProvider,
-			Key:           config.Observability.LogTraceIDKey,
-		}))
-	} else {
-		logger = slog.New(logs.NewTraceHandler(&logs.TraceHandlerOptions{
-			Handler: logs.NewFormatHandler(os.Stdout, &logs.FormatHandlerOptions{
-				Level:  config.Observability.LogLevel,
-				Colors: true,
-			}),
-			TraceProvider: traceProvider,
-			Key:           config.Observability.LogTraceIDKey,
-		}))
+	if config.Observability.Logger == nil {
+		if !config.Observability.LogColor {
+			logger = slog.New(logs.NewTraceHandler(&logs.TraceHandlerOptions{
+				Handler: slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+					Level:     config.Observability.LogLevel,
+					AddSource: false,
+				}),
+				TraceProvider: traceProvider,
+				Key:           config.Observability.LogTraceIDKey,
+			}))
+		} else {
+			logger = slog.New(logs.NewTraceHandler(&logs.TraceHandlerOptions{
+				Handler: logs.NewFormatHandler(os.Stdout, &logs.FormatHandlerOptions{
+					Level:  config.Observability.LogLevel,
+					Colors: true,
+				}),
+				TraceProvider: traceProvider,
+				Key:           config.Observability.LogTraceIDKey,
+			}))
+		}
 	}
 	var hooks = newHooks()
 	var mux = &Mux{
@@ -117,7 +122,7 @@ func New(config *Config) *App {
 		Logger:   logger,
 		Traces:   traceProvider,
 		Metrics:  metricProvider,
-		BgWorker: NewBackgroundWorker(config.BackgroundWorker.Capacity, config.BackgroundWorker.Workers, config.BackgroundWorker.OnPanic),
+		BgWorker: NewBackgroundWorker(config.BackgroundWorker.Capacity, config.BackgroundWorker.Workers, config.BackgroundWorker.OnPanic, logger),
 		hooks:    hooks,
 		config:   config,
 		mux:      mux,

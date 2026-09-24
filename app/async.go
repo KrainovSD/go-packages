@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"runtime/debug"
 	"sync"
 	"time"
@@ -19,30 +19,17 @@ type backgroundTask struct {
 type BackgroundWorker struct {
 	tasks   chan backgroundTask
 	workers sync.WaitGroup
-	onPanic func(any)
+	onPanic func(err error, stack []byte, original any)
 	mu      sync.RWMutex
 	stopped bool
+	logger  *slog.Logger
 }
 
-func NewBackgroundWorker(capacity int, workers int, onPanic func(any)) *BackgroundWorker {
-	if onPanic == nil {
-		onPanic = func(epanic any) {
-			var stack = debug.Stack()
-			var err error
-			switch e := epanic.(type) {
-			case error:
-				err = e
-			case string:
-				err = errors.New(e)
-			default:
-				err = fmt.Errorf("%v", e)
-			}
-			log.Printf("BGWORKER PANIC: %v\n%s", err, stack)
-		}
-	}
+func NewBackgroundWorker(capacity int, workers int, onPanic func(err error, stack []byte, original any), logger *slog.Logger) *BackgroundWorker {
 	var bg = &BackgroundWorker{
 		tasks:   make(chan backgroundTask, capacity),
 		onPanic: onPanic,
+		logger:  logger,
 	}
 	for range workers {
 		bg.workers.Go(func() {
@@ -52,15 +39,30 @@ func NewBackgroundWorker(capacity int, workers int, onPanic func(any)) *Backgrou
 		})
 	}
 	return bg
+}
 
+func (bg *BackgroundWorker) handlePanic(value any) {
+	var stack = debug.Stack()
+	var err error
+	switch e := value.(type) {
+	case error:
+		err = e
+	case string:
+		err = errors.New(e)
+	default:
+		err = fmt.Errorf("%v", e)
+	}
+	if bg.onPanic != nil {
+		bg.onPanic(err, stack, value)
+	} else {
+		bg.logger.LogAttrs(context.Background(), slog.LevelError, "BGWORKER PANIC", slog.String("err", err.Error()), slog.String("stack", string(stack)))
+	}
 }
 
 func (bg *BackgroundWorker) run(task backgroundTask) {
 	defer func() {
 		if value := recover(); value != nil {
-			if bg.onPanic != nil {
-				bg.onPanic(value)
-			}
+			bg.handlePanic(value)
 		}
 	}()
 	var ctx = context.WithoutCancel(task.Ctx)
@@ -104,9 +106,7 @@ func (bg *BackgroundWorker) Go(fn func()) {
 	bg.workers.Go(func() {
 		defer func() {
 			if value := recover(); value != nil {
-				if bg.onPanic != nil {
-					bg.onPanic(value)
-				}
+				bg.handlePanic(value)
 			}
 		}()
 		fn()
