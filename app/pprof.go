@@ -27,7 +27,7 @@ func startPprof(port int) {
 	mux.Handle("/debug/pprof/mutex", pprof.Handler("mutex"))
 
 	var server = &http.Server{
-		Addr:    fmt.Sprintf("localhost:%d", port),
+		Addr:    fmt.Sprintf(":%d", port),
 		Handler: mux,
 	}
 	log.Println("pprof listening on", server.Addr)
