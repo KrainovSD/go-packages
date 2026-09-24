@@ -102,6 +102,7 @@ type ObservabilityConfig struct {
 	OtlpExporterURL string
 	OtlpProtocol    string
 	Pprof           bool
+	PprofPort       int
 	Logger          *slog.Logger
 }
 
@@ -111,5 +112,8 @@ func (config *ObservabilityConfig) setDefaults() {
 	}
 	if config.OtlpProtocol == "" {
 		config.OtlpProtocol = "grpc"
+	}
+	if config.PprofPort == 0 {
+		config.PprofPort = 9000
 	}
 }

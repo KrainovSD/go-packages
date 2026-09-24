@@ -1,13 +1,14 @@
 package app
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"net/http/pprof"
 	"runtime"
 )
 
-func startPprof() {
+func startPprof(port int) {
 	runtime.SetBlockProfileRate(1)
 	runtime.SetMutexProfileFraction(1)
 
@@ -26,7 +27,7 @@ func startPprof() {
 	mux.Handle("/debug/pprof/mutex", pprof.Handler("mutex"))
 
 	var server = &http.Server{
-		Addr:    "localhost:6060",
+		Addr:    fmt.Sprintf("localhost:%d", port),
 		Handler: mux,
 	}
 	log.Println("pprof listening on", server.Addr)

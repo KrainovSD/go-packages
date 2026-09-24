@@ -33,7 +33,7 @@ type App struct {
 func New(config *Config) *App {
 	config.setDefaults()
 	if config.Observability.Pprof {
-		go startPprof()
+		go startPprof(config.Observability.PprofPort)
 	}
 	var startupCtx, cancelStartupCtx = context.WithTimeout(context.Background(), config.StartupTimeout)
 	defer cancelStartupCtx()
