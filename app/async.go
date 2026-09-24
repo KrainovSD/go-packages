@@ -2,6 +2,10 @@ package app
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"log"
+	"runtime/debug"
 	"sync"
 	"time"
 )
@@ -21,6 +25,21 @@ type BackgroundWorker struct {
 }
 
 func NewBackgroundWorker(capacity int, workers int, onPanic func(any)) *BackgroundWorker {
+	if onPanic == nil {
+		onPanic = func(epanic any) {
+			var stack = debug.Stack()
+			var err error
+			switch e := epanic.(type) {
+			case error:
+				err = e
+			case string:
+				err = errors.New(e)
+			default:
+				err = fmt.Errorf("%v", e)
+			}
+			log.Printf("BGWORKER PANIC: %v\n%s", err, stack)
+		}
+	}
 	var bg = &BackgroundWorker{
 		tasks:   make(chan backgroundTask, capacity),
 		onPanic: onPanic,
@@ -65,6 +84,7 @@ func (bg *BackgroundWorker) Stop() {
 	bg.workers.Wait()
 }
 
+// Send task to limited queue
 func (bg *BackgroundWorker) Do(ctx context.Context, fn func(ctx context.Context), timeout time.Duration) bool {
 	bg.mu.RLock()
 	defer bg.mu.RUnlock()
@@ -79,6 +99,16 @@ func (bg *BackgroundWorker) Do(ctx context.Context, fn func(ctx context.Context)
 	return true
 }
 
+// Send task to immediately execute
 func (bg *BackgroundWorker) Go(fn func()) {
-	bg.workers.Go(fn)
+	bg.workers.Go(func() {
+		defer func() {
+			if value := recover(); value != nil {
+				if bg.onPanic != nil {
+					bg.onPanic(value)
+				}
+			}
+		}()
+		fn()
+	})
 }
