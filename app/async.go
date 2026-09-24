@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"runtime/debug"
 	"sync"
 	"time"
@@ -26,6 +27,12 @@ type BackgroundWorker struct {
 }
 
 func NewBackgroundWorker(capacity int, workers int, onPanic func(err error, stack []byte, original any), logger *slog.Logger) *BackgroundWorker {
+	if logger == nil {
+		logger = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+			Level:     slog.LevelInfo,
+			AddSource: false,
+		}))
+	}
 	var bg = &BackgroundWorker{
 		tasks:   make(chan backgroundTask, capacity),
 		onPanic: onPanic,
