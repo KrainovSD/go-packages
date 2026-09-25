@@ -238,6 +238,12 @@ func New(o *OauthOptions) (*Oauth, error) {
 			InsecureSkipSignatureCheck: opts.Provider.InsecureSkipSignatureCheck,
 		})
 		var endpoint = oidcProvider.Endpoint()
+		if opts.Provider.AuthURL != "" {
+			endpoint.AuthURL = opts.Provider.AuthURL
+		}
+		if opts.Provider.TokenURL != "" {
+			endpoint.TokenURL = opts.Provider.TokenURL
+		}
 		oauthProvider = &oauth2.Config{
 			ClientID:     opts.Provider.ClientID,
 			ClientSecret: opts.Provider.ClientSecret,
