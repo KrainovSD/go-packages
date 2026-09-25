@@ -9,7 +9,7 @@ import (
 	"github.com/KrainovSD/go-packages/internal/config"
 	"github.com/KrainovSD/go-packages/metrics"
 	"github.com/KrainovSD/go-packages/traces"
-	"github.com/confluentinc/confluent-kafka-go/kafka"
+	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 )

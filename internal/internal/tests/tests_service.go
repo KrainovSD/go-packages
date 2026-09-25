@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/KrainovSD/go-packages/internal/modules/cradle"
-	"github.com/confluentinc/confluent-kafka-go/kafka"
+	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 )
 
 type TestsServiceOptions struct {

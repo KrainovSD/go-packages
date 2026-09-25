@@ -14,7 +14,7 @@ import (
 	"github.com/KrainovSD/go-packages/queue"
 	"github.com/KrainovSD/go-packages/storage"
 	"github.com/KrainovSD/go-packages/web"
-	"github.com/confluentinc/confluent-kafka-go/kafka"
+	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
