@@ -2,9 +2,13 @@ package oauth
 
 import (
 	"crypto/subtle"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
+	"time"
 
 	"golang.org/x/oauth2"
 
@@ -30,6 +34,52 @@ func getIdTokenExpires(token *oidc.IDToken) int {
 		return 0
 	}
 	return int(token.Expiry.Sub(token.IssuedAt).Seconds())
+}
+
+func getUnverifiedIdTokenExpires(rawIdToken string) int {
+	var parts = strings.Split(rawIdToken, ".")
+	if len(parts) != 3 {
+		return 0
+	}
+	var payload []byte
+	var err error
+	if payload, err = base64.RawURLEncoding.DecodeString(parts[1]); err != nil {
+		return 0
+	}
+	var claims struct {
+		ExpiresAt int64 `json:"exp"`
+	}
+	if err = json.Unmarshal(payload, &claims); err != nil {
+		return 0
+	}
+	var expires = int(claims.ExpiresAt - time.Now().Unix())
+	if expires < 0 {
+		return 0
+	}
+	return expires
+}
+
+func (o *Oauth) newSessionToken(tokenInfo TokenInfo, verifiedIdToken *oidc.IDToken) SessionToken {
+	if tokenInfo.IdToken == "" {
+		return SessionToken{
+			Token:   tokenInfo.AccessToken,
+			Expires: tokenInfo.ExpiresIn,
+		}
+	}
+	if verifiedIdToken != nil {
+		return SessionToken{
+			Token:   tokenInfo.IdToken,
+			Expires: getIdTokenExpires(verifiedIdToken),
+		}
+	}
+	var expires = getUnverifiedIdTokenExpires(tokenInfo.IdToken)
+	if expires == 0 {
+		expires = tokenInfo.ExpiresIn
+	}
+	return SessionToken{
+		Token:   tokenInfo.IdToken,
+		Expires: expires,
+	}
 }
 
 func safeCompare(a string, b string) bool {

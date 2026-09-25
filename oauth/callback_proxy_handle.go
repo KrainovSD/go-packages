@@ -71,16 +71,8 @@ func (o *Oauth) CallbackProxyHandle() func(w http.ResponseWriter, r *http.Reques
 				o.sendError(w, r, fmt.Errorf("create session: %w", err), 0)
 				return
 			}
-		} else if verifiedIdToken != nil {
-			sessionToken = SessionToken{
-				Token:   tokenInfo.IdToken,
-				Expires: getIdTokenExpires(verifiedIdToken),
-			}
 		} else {
-			sessionToken = SessionToken{
-				Token:   tokenInfo.AccessToken,
-				Expires: tokenInfo.ExpiresIn,
-			}
+			sessionToken = o.newSessionToken(tokenInfo, verifiedIdToken)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(sessionToken)

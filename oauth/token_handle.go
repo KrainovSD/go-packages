@@ -55,16 +55,8 @@ func (o *Oauth) TokenHandle() func(w http.ResponseWriter, r *http.Request) {
 					o.sendError(w, r, fmt.Errorf("create session: %w", err), 401)
 					return
 				}
-			} else if verifiedIdToken != nil {
-				sessionToken = SessionToken{
-					Token:   tokenInfo.IdToken,
-					Expires: getIdTokenExpires(verifiedIdToken),
-				}
 			} else {
-				sessionToken = SessionToken{
-					Token:   tokenInfo.AccessToken,
-					Expires: tokenInfo.ExpiresIn,
-				}
+				sessionToken = o.newSessionToken(tokenInfo, verifiedIdToken)
 			}
 		} else {
 			sessionToken = SessionToken{

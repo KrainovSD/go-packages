@@ -92,16 +92,8 @@ func (o *Oauth) CallbackHandle() func(w http.ResponseWriter, r *http.Request) {
 				redirectWithError(fmt.Errorf("create session: %w", err))
 				return
 			}
-		} else if verifiedIdToken != nil {
-			sessionToken = SessionToken{
-				Token:   tokenInfo.IdToken,
-				Expires: getIdTokenExpires(verifiedIdToken),
-			}
 		} else {
-			sessionToken = SessionToken{
-				Token:   tokenInfo.AccessToken,
-				Expires: tokenInfo.ExpiresIn,
-			}
+			sessionToken = o.newSessionToken(tokenInfo, verifiedIdToken)
 		}
 
 		if o.cookieRefreshToken != nil {

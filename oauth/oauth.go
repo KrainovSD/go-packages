@@ -262,6 +262,7 @@ func New(o *OauthOptions) (*Oauth, error) {
 			}
 		}
 	} else {
+		opts.Log.Warn("oauth issuer is not set, id token verification is not available")
 		oauthProvider = &oauth2.Config{
 			ClientID:     opts.Provider.ClientID,
 			ClientSecret: opts.Provider.ClientSecret,
@@ -480,12 +481,8 @@ func (o *Oauth) newTokenInfo(oauthToken *oauth2.Token) TokenInfo {
 		}
 
 	}
-	if token.RefreshToken != "" && token.RefreshTokenExpiresIn == 0 {
-		if o.settings.DefaultRefreshTokenExpiresIn != 0 {
-			token.RefreshTokenExpiresIn = o.settings.DefaultRefreshTokenExpiresIn
-		} else {
-			token.RefreshTokenExpiresIn = token.ExpiresIn * 10
-		}
+	if token.RefreshToken != "" && token.RefreshTokenExpiresIn == 0 && o.settings.DefaultRefreshTokenExpiresIn != 0 {
+		token.RefreshTokenExpiresIn = o.settings.DefaultRefreshTokenExpiresIn
 	}
 	return token
 }
