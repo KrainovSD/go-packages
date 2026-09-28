@@ -90,8 +90,12 @@ func New(config *Config) *App {
 			MuxMiddleware{
 				ID: traces.MiddlewareID,
 				Fn: traces.NewMiddleware(&traces.MiddlewareOptions{
-					Traces:        traceProvider,
-					ExcludeStatic: true,
+					Traces: traceProvider,
+					StaticClassifier: &web.StaticClassifierOptions{
+						Enabled:           true,
+						DynamicExtensions: config.Observability.DynamicExtensions,
+						Custom:            config.Observability.IsStatic,
+					},
 				}),
 			},
 			MuxMiddleware{
@@ -103,8 +107,12 @@ func New(config *Config) *App {
 			MuxMiddleware{
 				ID: logs.MiddlewareID,
 				Fn: logs.NewMiddleware(&logs.MiddlewareOptions{
-					Log:           logger,
-					ExcludeStatic: true,
+					Log: logger,
+					StaticClassifier: &web.StaticClassifierOptions{
+						Enabled:           true,
+						DynamicExtensions: config.Observability.DynamicExtensions,
+						Custom:            config.Observability.IsStatic,
+					},
 				}),
 			},
 			MuxMiddleware{

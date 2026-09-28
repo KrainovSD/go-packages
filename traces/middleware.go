@@ -3,7 +3,6 @@ package traces
 import (
 	"fmt"
 	"net/http"
-	"path/filepath"
 
 	"github.com/KrainovSD/go-packages/web"
 	"go.opentelemetry.io/otel"
@@ -14,17 +13,18 @@ import (
 )
 
 type MiddlewareOptions struct {
-	Traces        *Provider
-	ExcludeStatic bool
+	Traces           *Provider
+	StaticClassifier *web.StaticClassifierOptions
 }
 
 const MiddlewareID = "ksd-traces"
 
 func NewMiddleware(opts *MiddlewareOptions) func(next http.Handler) http.Handler {
+	var isStatic = web.NewStaticClassifier(opts.StaticClassifier)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			var withTraces = opts.Traces.Exist()
-			if withTraces && opts.ExcludeStatic && filepath.Ext(r.URL.Path) != "" {
+			if withTraces && isStatic(r.URL.Path) {
 				withTraces = false
 			}
 			if withTraces {

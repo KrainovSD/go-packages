@@ -96,14 +96,16 @@ func (config *ServerConfig) setDefaults() {
 }
 
 type ObservabilityConfig struct {
-	LogLevel        slog.Level
-	LogColor        bool
-	LogTraceIDKey   string
-	OtlpExporterURL string
-	OtlpProtocol    string
-	Pprof           bool
-	PprofPort       int
-	Logger          *slog.Logger
+	LogLevel          slog.Level
+	LogColor          bool
+	LogTraceIDKey     string
+	OtlpExporterURL   string
+	OtlpProtocol      string
+	Pprof             bool
+	PprofPort         int
+	Logger            *slog.Logger
+	DynamicExtensions []string
+	IsStatic          func(path string) bool
 }
 
 func (config *ObservabilityConfig) setDefaults() {
