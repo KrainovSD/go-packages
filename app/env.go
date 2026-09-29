@@ -171,8 +171,8 @@ func NewEnvSystemConfig(prefix string) *EnvSystemConfig {
 	}
 	config.OtlpExporterURL = prefixer("OTLP_EXPORTER_URL")
 	config.OtlpExporterProtocol = prefixer("OTLP_PROTOCOL")
-	config.Pprof = helpers.ParseEnvBool(os.Getenv("PPROF"))
-	var pprofPort = helpers.ParseEnvInt(os.Getenv("PPROF_PORT"))
+	config.Pprof = helpers.ParseEnvBool(prefixer("PPROF"))
+	var pprofPort = helpers.ParseEnvInt(prefixer("PPROF_PORT"))
 	if pprofPort == nil {
 		config.PprofPort = 9000
 	} else {
