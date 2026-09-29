@@ -4,15 +4,15 @@ import (
 	"compress/gzip"
 	"log/slog"
 	"net/http"
-	"strings"
 )
 
 type shouldCompress = func(w http.ResponseWriter) bool
 
 type WriterMiddlewareOptions struct {
-	CompressLevel  int
-	Compress       bool
-	ShouldCompress func(w http.ResponseWriter) bool
+	CompressLevel   int
+	Compress        bool
+	CompressMinSize int
+	ShouldCompress  func(w http.ResponseWriter) bool
 }
 
 type WriterMiddleware struct {
@@ -49,34 +49,38 @@ func shouldCompressFn(w http.ResponseWriter) bool {
 
 func NewWriterMiddleware(opts *WriterMiddlewareOptions) func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
+		var compressMinSize = opts.CompressMinSize
+		if compressMinSize <= 0 {
+			compressMinSize = 1 << 10
+		}
+		var compressLevel = resolveGzipLevel(opts.CompressLevel)
+		var shouldCompress = shouldCompressFn
+		if opts.ShouldCompress != nil {
+			shouldCompress = opts.ShouldCompress
+		}
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			var shouldCompress = shouldCompressFn
-			if opts.ShouldCompress != nil {
-				shouldCompress = opts.ShouldCompress
+			var writer = &ResponseWriter{
+				originalWriter:  w,
+				compress:        opts.Compress && canCompress(r.Header),
+				compressLevel:   compressLevel,
+				compressMinSize: compressMinSize,
+				shouldCompress:  shouldCompress,
+				state:           statePending,
 			}
-			var writer = NewResponseWriter(&ResponseWriterOptions{
-				OriginalWriter: w,
-				Compress:       opts.Compress && canCompress(r.Header),
-				CompressLevel:  opts.CompressLevel,
-				ShouldCompress: shouldCompress,
-			})
 			next.ServeHTTP(writer, r)
-			if writer, ok := writer.(*ResponseWriter); ok {
-				if writer.compressWriter != nil {
-					writer.compressWriter.Close()
-				}
-			}
+			writer.finalize()
 		})
 	}
 }
 
-func canCompress(header http.Header) bool {
-	var encoding = header["Accept-Encoding"]
-	if len(encoding) == 0 {
-		return false
-	}
-	return strings.Contains(encoding[0], "gzip")
-}
+type compressState uint8
+
+const (
+	statePending compressState = iota
+	stateBuffering
+	stateStreaming
+	stateFinalized
+)
 
 type MiddlewarePanic struct {
 	Err   error
@@ -84,109 +88,131 @@ type MiddlewarePanic struct {
 }
 
 type ResponseWriter struct {
-	panic          *MiddlewarePanic
-	err            error
-	logAttrs       []slog.Attr
-	compressWriter *gzip.Writer
-	originalWriter http.ResponseWriter
-	status         int
-	closedHeader   bool
-	compress       bool
-	compressLevel  int
-	shouldCompress shouldCompress
+	panic           *MiddlewarePanic
+	err             error
+	logAttrs        []slog.Attr
+	buffer          []byte
+	compressWriter  *gzip.Writer
+	originalWriter  http.ResponseWriter
+	status          int
+	compressMinSize int
+	compressLevel   int
+	state           compressState
+	closedHeader    bool
+	compress        bool
+	shouldCompress  shouldCompress
 }
 
-type ResponseWriterOptions struct {
-	OriginalWriter http.ResponseWriter
-	Compress       bool
-	CompressLevel  int
-	ShouldCompress shouldCompress
-}
-
-func NewResponseWriter(opts *ResponseWriterOptions) http.ResponseWriter {
-	return &ResponseWriter{
-		originalWriter: opts.OriginalWriter,
-		status:         0,
-		compress:       opts.Compress,
-		compressLevel:  opts.CompressLevel,
-		shouldCompress: opts.ShouldCompress,
-	}
-}
-
-func (g *ResponseWriter) Status() int {
-	return g.status
-}
-
-func (g *ResponseWriter) Written() bool {
-	return g.closedHeader
-}
-
-func (g *ResponseWriter) Write(b []byte) (int, error) {
-	if !g.closedHeader {
-		g.WriteHeader(http.StatusOK)
-	}
-	if g.compressWriter != nil {
-		return g.compressWriter.Write(b)
-	}
-	return g.originalWriter.Write(b)
-}
-
-func (g *ResponseWriter) WriteHeader(statusCode int) {
-	if g.Written() {
+func (w *ResponseWriter) WriteHeader(statusCode int) {
+	if w.state != statePending {
 		return
 	}
-	if g.compress && g.shouldCompress(g) {
-		g.SetGzipWriter()
-		g.originalWriter.Header().Del("Content-Length")
-		g.originalWriter.Header().Set("Content-Encoding", "gzip")
-		g.originalWriter.Header().Set("Vary", "Accept-Encoding")
-	}
-	g.closedHeader = true
-	g.originalWriter.WriteHeader(statusCode)
-	g.status = statusCode
-}
-
-func (g *ResponseWriter) Header() http.Header {
-	return g.originalWriter.Header()
-}
-
-func (g *ResponseWriter) SetGzipWriter() {
-	var gz *gzip.Writer
-	var err error
-	var level = gzip.DefaultCompression
-	if g.compressLevel != 0 {
-		level = g.compressLevel
-	}
-	// should close after write
-	if gz, err = gzip.NewWriterLevel(g.originalWriter, level); err != nil {
+	w.status = statusCode
+	if w.compress && w.shouldCompress(w) {
+		w.state = stateBuffering
 		return
 	}
-	g.compressWriter = gz
+	w.state = stateStreaming
+	w.writeHeader()
 }
 
-func (g *ResponseWriter) SetError(err error) {
-	g.err = err
+func (w *ResponseWriter) Write(b []byte) (int, error) {
+	w.WriteHeader(http.StatusOK)
+	switch w.state {
+	case stateBuffering:
+		if w.compressMinSize <= 0 || len(w.buffer)+len(b) >= w.compressMinSize {
+			w.originalWriter.Header().Del("Content-Length")
+			w.originalWriter.Header().Set("Content-Encoding", "gzip")
+			w.originalWriter.Header().Set("Vary", "Accept-Encoding")
+			w.state = stateStreaming
+			w.writeHeader()
+			var gz = gzipWriterPools.get(w.compressLevel)
+			gz.Reset(w.originalWriter)
+			w.compressWriter = gz
+			if len(w.buffer) > 0 {
+				w.compressWriter.Write(w.buffer)
+				w.buffer = nil
+			}
+			return w.compressWriter.Write(b)
+		}
+		if w.buffer == nil {
+			w.buffer = make([]byte, 0, w.compressMinSize)
+		}
+		w.buffer = append(w.buffer, b...)
+		return len(b), nil
+	case stateStreaming:
+		if w.compressWriter != nil {
+			return w.compressWriter.Write(b)
+		}
+		return w.originalWriter.Write(b)
+	}
+	return len(b), nil
 }
 
-func (g *ResponseWriter) GetError() error {
-	return g.err
+func (w *ResponseWriter) writeHeader() {
+	if w.closedHeader {
+		return
+	}
+	w.closedHeader = true
+	w.originalWriter.WriteHeader(w.status)
 }
 
-func (g *ResponseWriter) SetPanic(err error, stack []byte) {
-	g.panic = &MiddlewarePanic{
+func (w *ResponseWriter) finalize() {
+	if w.state == stateFinalized {
+		return
+	}
+	switch w.state {
+	case stateBuffering:
+		w.writeHeader()
+		if len(w.buffer) > 0 {
+			w.originalWriter.Write(w.buffer)
+		}
+	case stateStreaming:
+		if w.compressWriter != nil {
+			w.compressWriter.Close()
+			gzipWriterPools.put(w.compressLevel, w.compressWriter)
+			w.compressWriter = nil
+		}
+	}
+	w.state = stateFinalized
+	w.buffer = nil
+}
+
+func (w *ResponseWriter) Status() int {
+	return w.status
+}
+
+func (w *ResponseWriter) Written() bool {
+	return w.closedHeader
+}
+
+func (w *ResponseWriter) Header() http.Header {
+	return w.originalWriter.Header()
+}
+
+func (w *ResponseWriter) SetError(err error) {
+	w.err = err
+}
+
+func (w *ResponseWriter) GetError() error {
+	return w.err
+}
+
+func (w *ResponseWriter) SetPanic(err error, stack []byte) {
+	w.panic = &MiddlewarePanic{
 		Err:   err,
 		Stack: stack,
 	}
 }
 
-func (g *ResponseWriter) GetPanic() *MiddlewarePanic {
-	return g.panic
+func (w *ResponseWriter) GetPanic() *MiddlewarePanic {
+	return w.panic
 }
 
-func (g *ResponseWriter) AddLogAttrs(attrs ...slog.Attr) {
-	g.logAttrs = append(g.logAttrs, attrs...)
+func (w *ResponseWriter) AddLogAttrs(attrs ...slog.Attr) {
+	w.logAttrs = append(w.logAttrs, attrs...)
 }
 
-func (g *ResponseWriter) GetLogAttrs() []slog.Attr {
-	return g.logAttrs
+func (w *ResponseWriter) GetLogAttrs() []slog.Attr {
+	return w.logAttrs
 }

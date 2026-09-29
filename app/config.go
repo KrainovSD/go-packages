@@ -1,6 +1,7 @@
 package app
 
 import (
+	"compress/gzip"
 	"log/slog"
 	"net/http"
 	"runtime"
@@ -60,15 +61,17 @@ func (config *BackgroundWorkerConfig) setDefaults() {
 }
 
 type ServerConfig struct {
-	Port              int
-	ReadTimeout       time.Duration
-	WriteTimeout      time.Duration
-	IdleTimeout       time.Duration
-	ReadHeaderTimeout time.Duration
-	MaxHeaderBytes    int
-	CompressRequest   bool
-	ShouldCompress    func(w http.ResponseWriter) bool
-	BodySizeLimit     int64
+	Port                    int
+	ReadTimeout             time.Duration
+	WriteTimeout            time.Duration
+	IdleTimeout             time.Duration
+	ReadHeaderTimeout       time.Duration
+	MaxHeaderBytes          int
+	CompressResponse        bool
+	CompressResponseLevel   int
+	CompressResponseMinSize int
+	ShouldCompress          func(w http.ResponseWriter) bool
+	BodySizeLimit           int64
 }
 
 func (config *ServerConfig) setDefaults() {
@@ -92,6 +95,9 @@ func (config *ServerConfig) setDefaults() {
 	}
 	if config.BodySizeLimit == 0 {
 		config.BodySizeLimit = 5 << 20
+	}
+	if config.CompressResponseLevel == 0 {
+		config.CompressResponseLevel = gzip.DefaultCompression
 	}
 }
 

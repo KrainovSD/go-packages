@@ -56,12 +56,14 @@ type EnvMinioConfig struct {
 }
 
 type EnvSystemConfig struct {
-	Port                 int
-	LogLevel             slog.Level
-	LogColor             bool
-	CompressRequest      bool
-	OtlpExporterURL      string
-	OtlpExporterProtocol string
+	Port                    int
+	LogLevel                slog.Level
+	LogColor                bool
+	CompressResponse        bool
+	CompressResponseLevel   int
+	CompressResponseMinSize int
+	OtlpExporterURL         string
+	OtlpExporterProtocol    string
 }
 
 func NewEnvConfig(prefix string) *EnvConfig {
@@ -156,7 +158,15 @@ func NewEnvSystemConfig(prefix string) *EnvSystemConfig {
 
 	}
 	config.LogColor = helpers.ParseEnvBool(prefixer("LOG_COLOR"))
-	config.CompressRequest = helpers.ParseEnvBool(prefixer("COMPRESS_REQUEST"))
+	config.CompressResponse = helpers.ParseEnvBool(prefixer("COMPRESS_RESPONSE"))
+	var compressLevel = helpers.ParseEnvInt(prefixer("COMPRESS_RESPONSE_LEVEL"))
+	if compressLevel != nil {
+		config.CompressResponseLevel = *compressLevel
+	}
+	var compressMinSize = helpers.ParseEnvInt(prefixer("COMPRESS_RESPONSE_MIN_SIZE"))
+	if compressMinSize != nil {
+		config.CompressResponseMinSize = *compressMinSize
+	}
 	config.OtlpExporterURL = prefixer("OTLP_EXPORTER_URL")
 	config.OtlpExporterProtocol = prefixer("OTLP_PROTOCOL")
 	return config

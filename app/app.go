@@ -1,7 +1,6 @@
 package app
 
 import (
-	"compress/gzip"
 	"context"
 	"log/slog"
 	"net"
@@ -82,9 +81,10 @@ func New(config *Config) *App {
 			MuxMiddleware{
 				ID: web.WriterMiddlewareID,
 				Fn: web.NewWriterMiddleware(&web.WriterMiddlewareOptions{
-					Compress:       config.Server.CompressRequest,
-					CompressLevel:  gzip.DefaultCompression,
-					ShouldCompress: config.Server.ShouldCompress,
+					Compress:        config.Server.CompressResponse,
+					CompressLevel:   config.Server.CompressResponseLevel,
+					CompressMinSize: config.Server.CompressResponseMinSize,
+					ShouldCompress:  config.Server.ShouldCompress,
 				}),
 			},
 			MuxMiddleware{
