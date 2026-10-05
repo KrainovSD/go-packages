@@ -38,7 +38,7 @@ func (of *OauthFrontend) newDefault() *OauthFrontend {
 		o.LogoutPath = "/logout"
 	}
 	if o.ExpiresQuery == "" {
-		o.ExpiresQuery = "session_token_expires"
+		o.ExpiresQuery = "session_expires"
 	}
 	return &o
 }
