@@ -2,6 +2,7 @@ package helpers
 
 import (
 	"bufio"
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
@@ -146,4 +147,20 @@ func TruncateString(str string, length int) string {
 		return str
 	}
 	return string(r[:length])
+}
+
+func LimitWork(pctx context.Context, limit time.Duration, fn func(ctx context.Context) error) error {
+	var ctx, cancel = context.WithTimeout(pctx, limit)
+	defer cancel()
+	var errCh = make(chan error, 1)
+	go func() {
+		defer close(errCh)
+		errCh <- fn(ctx)
+	}()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case err := <-errCh:
+		return err
+	}
 }

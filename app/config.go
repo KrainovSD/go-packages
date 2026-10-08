@@ -9,13 +9,14 @@ import (
 )
 
 type Config struct {
-	ServiceName      string
-	ServiceVersion   string
-	StartupTimeout   time.Duration
-	ShutdownTimeout  time.Duration
-	BackgroundWorker *BackgroundWorkerConfig
-	Server           *ServerConfig
-	Observability    *ObservabilityConfig
+	ServiceName               string
+	ServiceVersion            string
+	StartupTimeout            time.Duration
+	ShutdownTimeout           time.Duration
+	ShutdownServerBudgetRatio float64
+	BackgroundWorker          *BackgroundWorkerConfig
+	Server                    *ServerConfig
+	Observability             *ObservabilityConfig
 }
 
 func (config *Config) setDefaults() {
@@ -29,7 +30,10 @@ func (config *Config) setDefaults() {
 		config.StartupTimeout = 30 * time.Second
 	}
 	if config.ShutdownTimeout == 0 {
-		config.ShutdownTimeout = 20 * time.Second
+		config.ShutdownTimeout = 30 * time.Second
+	}
+	if config.ShutdownServerBudgetRatio <= 0 || config.ShutdownServerBudgetRatio > 1 {
+		config.ShutdownServerBudgetRatio = 0.6
 	}
 	if config.BackgroundWorker == nil {
 		config.BackgroundWorker = &BackgroundWorkerConfig{}

@@ -53,16 +53,16 @@ func NewRedis(ctx context.Context, opts *RedisOptions) (redis.UniversalClient, e
 	var err error
 	if opts.Tracing {
 		if err = redisotel.InstrumentTracing(client); err != nil {
-			return nil, fmt.Errorf("register tracing: %w", err)
+			return client, fmt.Errorf("register tracing: %w", err)
 		}
 	}
 	if opts.Metrics {
 		if err = redisotel.InstrumentMetrics(client); err != nil {
-			return nil, fmt.Errorf("register metrics: %w", err)
+			return client, fmt.Errorf("register metrics: %w", err)
 		}
 	}
 	if err = client.Ping(ctx).Err(); err != nil {
-		return nil, err
+		return client, err
 	}
 	return client, nil
 }

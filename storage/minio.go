@@ -36,12 +36,12 @@ func NewMinio(ctx context.Context, opts *MinioOptions) (*minio.Client, error) {
 	var err error
 	var client *minio.Client
 	if client, err = minio.New(opts.Url, minioOpts); err != nil {
-		return nil, fmt.Errorf("create client: %w", err)
+		return client, fmt.Errorf("create client: %w", err)
 	}
 	for _, bucket := range opts.Buckets {
 		var exists bool
 		if exists, err = client.BucketExists(ctx, bucket); err != nil {
-			return nil, fmt.Errorf("check bucket exists: %w", err)
+			return client, fmt.Errorf("check bucket exists: %w", err)
 		}
 		if exists || !opts.CreateBucket {
 			continue
@@ -49,7 +49,7 @@ func NewMinio(ctx context.Context, opts *MinioOptions) (*minio.Client, error) {
 		if err = client.MakeBucket(ctx, bucket, minio.MakeBucketOptions{
 			Region: opts.Location,
 		}); err != nil {
-			return nil, fmt.Errorf("create bucket %s: %w", bucket, err)
+			return client, fmt.Errorf("create bucket %s: %w", bucket, err)
 		}
 	}
 	return client, nil

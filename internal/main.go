@@ -31,7 +31,7 @@ func main() {
 		ServiceName:     "test-service",
 		ServiceVersion:  "0.0.0",
 		StartupTimeout:  30 * time.Second,
-		ShutdownTimeout: 20 * time.Second,
+		ShutdownTimeout: 30 * time.Second,
 		Server: &app.ServerConfig{
 			Port:                    conf.Default.System.Port,
 			ReadTimeout:             5 * time.Second,
@@ -54,14 +54,13 @@ func main() {
 			Pprof:           false,
 		},
 	})
-
 	var mux = server.Mux().Clone()
 	mux.PushMiddlewares([]app.MuxMiddleware{
-		app.MuxMiddleware{
+		{
 			ID: "auth",
 			Fn: middlewares.NewAuth(middlewares.AuthOptions{Strict: true}),
 		},
-		app.MuxMiddleware{
+		{
 			ID: "logger",
 			Fn: middlewares.NewLogger(middlewares.LoggerOptions{Strict: true}),
 		},
@@ -73,17 +72,31 @@ func main() {
 			web.GoalkeeperMiddlewareID,
 		}),
 	)
+	var cradle = &cradle.Cradle{
+		Log:            server.Logger,
+		Conf:           conf,
+		Traces:         server.Traces,
+		Metrics:        server.Metrics,
+		Wg:             server.BgWorker,
+		ShutdownSignal: server.ShutdownSignal(),
+	}
 
-	server.Hooks().OnPreStartup(func(startupCtx context.Context) (func(shutdownCtx context.Context), error) {
+	server.Hooks().OnResourceInit("postgres", 10*time.Second, func(ctx context.Context) (func(context.Context), error) {
 		var db *pgxpool.Pool
-		if db, err = storage.NewPostgres(startupCtx, &storage.PostgresOptions{Connection: conf.Default.Postgres.Connection, Tracing: server.Traces.Exist()}); err != nil {
+		if db, err = storage.NewPostgres(ctx, &storage.PostgresOptions{Connection: conf.Default.Postgres.Connection, Tracing: server.Traces.Exist()}); err != nil {
 			return nil, err
 		}
 		if err = pg.Init(db); err != nil {
 			return nil, err
 		}
+		cradle.Db = db
+		return func(ctx context.Context) {
+			db.Close()
+		}, nil
+	})
+	server.Hooks().OnResourceInit("kafka", 10*time.Second, func(ctx context.Context) (func(context.Context), error) {
 		var kq *kafka.Producer
-		if kq, err = queue.NewProducer(startupCtx, &queue.ProducerOptions{
+		if kq, err = queue.NewProducer(ctx, &queue.ProducerOptions{
 			Servers: conf.Default.Kafka.Servers,
 			SecurityOptions: queue.SecurityOptions{
 				SecurityProtocol: conf.Default.Kafka.SecurityProtocol,
@@ -99,8 +112,14 @@ func main() {
 		}); err != nil {
 			return nil, err
 		}
+		cradle.Queue = kq
+		return func(ctx context.Context) {
+			kq.Close()
+		}, nil
+	})
+	server.Hooks().OnResourceInit("redis", 5*time.Second, func(ctx context.Context) (func(context.Context), error) {
 		var red redis.UniversalClient
-		if red, err = storage.NewRedis(startupCtx, &storage.RedisOptions{
+		if red, err = storage.NewRedis(ctx, &storage.RedisOptions{
 			Addresses:  conf.Default.Redis.Addresses,
 			Username:   conf.Default.Redis.Username,
 			Password:   conf.Default.Redis.Password,
@@ -112,38 +131,35 @@ func main() {
 		}); err != nil {
 			return nil, err
 		}
+		cradle.Redis = red
+		return func(ctx context.Context) {
+			red.Close()
+		}, nil
+	})
+	server.Hooks().OnResourceInit("api-client", 5*time.Second, func(ctx context.Context) (func(context.Context), error) {
 		var fetch *api.Client
 		if fetch, err = api.NewClient(&api.ClientOptions{Tracing: server.Traces.Exist()}); err != nil {
 			return nil, err
 		}
-		var cradle = &cradle.Cradle{
-			Api:            fetch,
-			Log:            server.Logger,
-			Conf:           conf,
-			Traces:         server.Traces,
-			Metrics:        server.Metrics,
-			Db:             db,
-			Redis:          red,
-			Queue:          kq,
-			Wg:             server.BgWorker,
-			ShutdownSignal: server.ShutdownSignal(),
-		}
+		cradle.Api = fetch
+		return func(ctx context.Context) {
+			fetch.Close()
+		}, nil
+	})
+
+	server.Hooks().OnPreStartup(func() error {
+
 		if err = router.InitRoutes(&router.RoutesOptions{
 			M:      server.Mux(),
 			SM:     staticMux,
 			TM:     mux,
 			Cradle: cradle,
 		}); err != nil {
-			return nil, err
+			return err
 		}
-		return func(ctx context.Context) {
-			db.Close()
-			kq.Close()
-			red.Close()
-			fetch.Close()
-		}, nil
+		return nil
 	})
-	server.Hooks().OnPostStartup(func(shutdownSignal context.Context) error {
+	server.Hooks().OnPostStartup(func() error {
 		fmt.Println("Server started on", conf.Default.System.Port)
 		return nil
 	})

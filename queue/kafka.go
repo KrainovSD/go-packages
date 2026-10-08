@@ -44,7 +44,7 @@ func NewProducer(ctx context.Context, opts *ProducerOptions) (*kafka.Producer, e
 	var producer *kafka.Producer
 	var err error
 	if producer, err = kafka.NewProducer(cm); err != nil {
-		return nil, fmt.Errorf("create kafka producer: %w", err)
+		return producer, fmt.Errorf("create kafka producer: %w", err)
 	}
 	return producer, nil
 }
@@ -70,11 +70,11 @@ func NewConsumer(ctx context.Context, opts *ConsumerOptions) (*kafka.Consumer, e
 	var consumer *kafka.Consumer
 	var err error
 	if consumer, err = kafka.NewConsumer(cm); err != nil {
-		return nil, fmt.Errorf("create kafka consumer: %w", err)
+		return consumer, fmt.Errorf("create kafka consumer: %w", err)
 	}
 	if err = consumer.SubscribeTopics(opts.ConsumeTopics, nil); err != nil {
 		_ = consumer.Close()
-		return nil, fmt.Errorf("subscribe topics: %w", err)
+		return consumer, fmt.Errorf("subscribe topics: %w", err)
 	}
 
 	return consumer, nil

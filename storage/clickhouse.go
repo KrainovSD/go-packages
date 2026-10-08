@@ -28,10 +28,10 @@ func NewClickhouse(ctx context.Context, opts *ClickhouseOptions) (clickhouse.Con
 	}
 	var conn clickhouse.Conn
 	if conn, err = clickhouse.Open(clickOpts); err != nil {
-		return nil, fmt.Errorf("open clickhouse: %w", err)
+		return conn, fmt.Errorf("open clickhouse: %w", err)
 	}
 	if err = ping(ctx, conn); err != nil {
-		return nil, fmt.Errorf("ping: %w", err)
+		return conn, fmt.Errorf("ping: %w", err)
 	}
 	return conn, nil
 }

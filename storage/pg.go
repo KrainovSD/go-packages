@@ -28,13 +28,13 @@ func NewPostgres(ctx context.Context, opts *PostgresOptions) (*pgxpool.Pool, err
 		config.ConnConfig.Tracer = &OtelPgxTracer{}
 	}
 	if pool, err = pgxpool.NewWithConfig(ctx, config); err != nil {
-		return nil, fmt.Errorf("create pg pool: %w", err)
+		return pool, fmt.Errorf("create pg pool: %w", err)
 	}
 	if err = pool.Ping(ctx); err != nil {
-		return nil, fmt.Errorf("pg ping check: %w", err)
+		return pool, fmt.Errorf("pg ping check: %w", err)
 	}
 	if err = warmPool(ctx, pool); err != nil {
-		return nil, fmt.Errorf("warm connections: %w", err)
+		return pool, fmt.Errorf("warm connections: %w", err)
 	}
 	return pool, nil
 }

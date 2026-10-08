@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -9,7 +10,9 @@ import (
 	"os/signal"
 	"strconv"
 	"syscall"
+	"time"
 
+	"github.com/KrainovSD/go-packages/helpers"
 	"github.com/KrainovSD/go-packages/logs"
 	"github.com/KrainovSD/go-packages/metrics"
 	"github.com/KrainovSD/go-packages/traces"
@@ -78,7 +81,7 @@ func New(config *Config) *App {
 	var mux = &Mux{
 		mux: &http.ServeMux{},
 		middlewares: []MuxMiddleware{
-			MuxMiddleware{
+			{
 				ID: web.WriterMiddlewareID,
 				Fn: web.NewWriterMiddleware(&web.WriterMiddlewareOptions{
 					Compress:        config.Server.CompressResponse,
@@ -87,7 +90,7 @@ func New(config *Config) *App {
 					ShouldCompress:  config.Server.ShouldCompress,
 				}),
 			},
-			MuxMiddleware{
+			{
 				ID: traces.MiddlewareID,
 				Fn: traces.NewMiddleware(&traces.MiddlewareOptions{
 					Traces: traceProvider,
@@ -98,13 +101,13 @@ func New(config *Config) *App {
 					},
 				}),
 			},
-			MuxMiddleware{
+			{
 				ID: metrics.MiddlewareID,
 				Fn: metrics.NewMiddleware(&metrics.MiddlewareOptions{
 					Metrics: metricProvider,
 				}),
 			},
-			MuxMiddleware{
+			{
 				ID: logs.MiddlewareID,
 				Fn: logs.NewMiddleware(&logs.MiddlewareOptions{
 					Log: logger,
@@ -115,11 +118,11 @@ func New(config *Config) *App {
 					},
 				}),
 			},
-			MuxMiddleware{
+			{
 				ID: web.SizeLimitMiddlewareID,
 				Fn: web.NewSizeLimitMiddleware(config.Server.BodySizeLimit),
 			},
-			MuxMiddleware{
+			{
 				ID: web.GoalkeeperMiddlewareID,
 				Fn: web.NewGoalkeeperMiddleware(),
 			},
@@ -161,7 +164,38 @@ func (a *App) Hooks() *Hooks {
 }
 
 func (a *App) Start() {
-	a.preStartup()
+	var err = helpers.LimitWork(context.Background(), a.config.StartupTimeout, func(ctx context.Context) error {
+		var err error
+		for _, i := range a.hooks.onResourceInit {
+			var initCtx, cancelInitCtx = context.WithTimeout(ctx, i.Duration)
+			var cleanFn func(ctx context.Context)
+			var start = time.Now()
+			a.Logger.Info("startup resource init", "name", i.Name, "status", "started")
+			if cleanFn, err = i.Fn(initCtx); err != nil {
+				a.Logger.Error("startup resource init", "name", i.Name, "status", "finished", "duration", time.Since(start), "error", err)
+				cancelInitCtx()
+				return err
+			}
+			a.Logger.Info("startup resource init", "name", i.Name, "status", "finished", "duration", time.Since(start))
+			cancelInitCtx()
+			if cleanFn != nil {
+				a.hooks.cleanup = append(a.hooks.cleanup, hooksCleanup{
+					Duration: i.Duration,
+					Fn:       cleanFn,
+				})
+			}
+		}
+		for _, fn := range a.hooks.onPreStartup {
+			if err = fn(); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		panic(fmt.Errorf("startup: %w", err))
+	}
+
 	var errChan = make(chan error, 1)
 	go func() {
 		var listener, err = net.Listen("tcp", a.server.Addr)
@@ -170,7 +204,11 @@ func (a *App) Start() {
 			return
 		}
 		defer listener.Close()
-		a.postStartup()
+		for _, fn := range a.hooks.onPostStartup {
+			if err = fn(); err != nil {
+				errChan <- err
+			}
+		}
 		errChan <- a.server.Serve(listener)
 	}()
 
@@ -186,62 +224,30 @@ func (a *App) Start() {
 	case <-signalCtx.Done():
 		a.Logger.Info("signal for shutdown received")
 	}
-
-	a.preShutdown()
-	var shutdownCtx, cancelShutdownCtx = context.WithTimeout(context.Background(), a.config.ShutdownTimeout)
-	defer cancelShutdownCtx()
-	var err error
-	if err = a.server.Shutdown(shutdownCtx); err != nil {
-		a.Logger.Error("shutdown server failed", "error", err.Error())
-		a.server.Close()
+	for _, preShutdownFn := range a.hooks.onPreShutdown {
+		preShutdownFn()
 	}
-	a.cancelShutdownSignal()
-	a.BgWorker.Stop()
-	var cleanup = a.hooks.cleanup
-	for _, clean := range cleanup {
-		var ctx, cancel = context.WithTimeout(context.Background(), a.config.ShutdownTimeout)
-		clean(ctx)
-		cancel()
-	}
-	a.postShutdown()
-}
 
-func (a *App) preStartup() {
-	var err error
-	var startupCtx, cancelStartupCtx = context.WithTimeout(context.Background(), a.config.StartupTimeout)
-	defer cancelStartupCtx()
-	for _, fn := range a.hooks.onPreStartup {
-		var clean hooksCleanup
-		if clean, err = fn(startupCtx); err != nil {
-			panic(err)
+	if err = helpers.LimitWork(context.Background(), a.config.StartupTimeout, func(ctx context.Context) error {
+		var err error
+		var serverCtx, cancelServerCtx = context.WithTimeout(ctx, a.config.StartupTimeout*time.Duration(a.config.ShutdownServerBudgetRatio))
+		defer cancelServerCtx()
+		if err = a.server.Shutdown(serverCtx); err != nil {
+			a.Logger.Error("shutdown server failed", "error", err.Error())
+			a.server.Close()
 		}
-		if clean != nil {
-			a.hooks.cleanup = append(a.hooks.cleanup, clean)
+		a.cancelShutdownSignal()
+		a.BgWorker.Stop()
+		for _, c := range a.hooks.cleanup {
+			var cleanCtx, cancelCleanCtx = context.WithTimeout(ctx, c.Duration)
+			c.Fn(cleanCtx)
+			cancelCleanCtx()
 		}
-	}
-}
-
-func (a *App) postStartup() {
-	var err error
-	for _, fn := range a.hooks.onPostStartup {
-		if err = fn(a.shutdownSignal); err != nil {
-			panic(err)
+		for _, postShutdownFn := range a.hooks.onPostShutdown {
+			postShutdownFn()
 		}
-	}
-}
-
-func (a *App) preShutdown() {
-	for _, fn := range a.hooks.onPreShutdown {
-		var shutdownCtx, cancelShutdownCtx = context.WithTimeout(context.Background(), a.config.ShutdownTimeout)
-		fn(shutdownCtx)
-		cancelShutdownCtx()
-	}
-}
-
-func (a *App) postShutdown() {
-	for _, fn := range a.hooks.onPostShutdown {
-		var shutdownCtx, cancelShutdownCtx = context.WithTimeout(context.Background(), a.config.ShutdownTimeout)
-		fn(shutdownCtx)
-		cancelShutdownCtx()
+		return nil
+	}); err != nil {
+		panic(fmt.Errorf("shutdown: %w", err))
 	}
 }
