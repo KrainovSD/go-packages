@@ -93,7 +93,6 @@ type Request struct {
 	Body          io.Reader
 	Ctx           context.Context
 	Timeout       time.Duration
-	Debug         bool
 }
 
 type Response struct {
@@ -152,9 +151,6 @@ func (c *Client) Send(request Request) (*Response, error) {
 		}
 		return nil, fmt.Errorf("do request host %s, path %s: %w", requestUrl.Host, requestUrl.Path, err)
 	}
-	if request.Debug {
-		fmt.Printf("request: %s, status: %d", requestUrl.String(), res.StatusCode)
-	}
 	return &Response{Response: res, cancel: cancel}, nil
 
 }
@@ -201,14 +197,19 @@ func (r *Client) SendWithRead(req RequestWithRead) (*ResponseWithRead, error) {
 	defer res.Close()
 	var data []byte
 	if data, err = res.Read(req.MaxSize); err != nil {
-		return nil, err
+		return &ResponseWithRead{
+			Response: res.Response,
+			Data:     nil,
+		}, err
 	}
 	if (req.IsBadStatus == nil && res.StatusCode >= 400) || (req.IsBadStatus != nil && req.IsBadStatus(res.StatusCode)) {
-		return nil, fmt.Errorf("%w: %d, host %s, path %s", ErrBadStatusCode, res.StatusCode, res.Request.URL.Host, res.Request.URL.Path)
+		return &ResponseWithRead{
+			Response: res.Response,
+			Data:     data,
+		}, fmt.Errorf("%w: %d, host %s, path %s", ErrBadStatusCode, res.StatusCode, res.Request.URL.Host, res.Request.URL.Path)
 	}
 	return &ResponseWithRead{
 		Response: res.Response,
 		Data:     data,
 	}, nil
-
 }
