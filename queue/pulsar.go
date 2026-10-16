@@ -87,14 +87,16 @@ func NewPulsarProducer(client pulsar.Client, opts *PulsarProducerOptions) (pulsa
 		producerOptions.MaxPendingMessages = opts.MaxPendingMessages
 	}
 	producerOptions.DisableBlockIfQueueFull = opts.DisableBlockIfQueueFull
-	var err error
-	if opts.Compression != "" {
-		var compression pulsar.CompressionType
-		if compression, err = newPulsarCompression(opts.Compression); err != nil {
-			return nil, err
-		}
-		producerOptions.CompressionType = compression
+	var compressionName = opts.Compression
+	if compressionName == "" {
+		compressionName = "zstd"
 	}
+	var err error
+	var compression pulsar.CompressionType
+	if compression, err = newPulsarCompression(compressionName); err != nil {
+		return nil, err
+	}
+	producerOptions.CompressionType = compression
 	var producer pulsar.Producer
 	if producer, err = client.CreateProducer(producerOptions); err != nil {
 		return nil, fmt.Errorf("create pulsar producer for topic %s: %w", opts.Topic, err)
