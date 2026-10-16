@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/KrainovSD/go-packages/helpers"
+	"github.com/KrainovSD/go-packages/queue"
 )
 
 type EnvConfig struct {
@@ -18,16 +19,13 @@ type EnvConfig struct {
 }
 
 type EnvKafkaConfig struct {
-	Servers          []string
-	SecurityProtocol string
-	Mechanism        string
-	User             string
-	Password         string
-	SslCaLocation    string
-	SslLocation      string
-	SslKeyLocation   string
-	KeytabPath       string
-	Principal        string
+	Servers         []string
+	SecurityOptions queue.KafkaSecurityOptions
+}
+
+type EnvPulsarConfig struct {
+	URL             string
+	SecurityOptions queue.PulsarSecurityOptions
 }
 
 type EnvRedisConfig struct {
@@ -35,7 +33,7 @@ type EnvRedisConfig struct {
 	Username  string
 	Password  string
 	Mode      string
-	Db        int
+	DB        int
 	Master    string
 }
 
@@ -80,60 +78,83 @@ func NewEnvConfig(prefix string) *EnvConfig {
 	return config
 }
 
+func NewEnvPulsarConfig(prefix string) *EnvPulsarConfig {
+	var prefixer = newEnvPrefixer(prefix)
+	var config = &EnvPulsarConfig{
+		URL: prefixer("PULSAR_URL"),
+		SecurityOptions: queue.PulsarSecurityOptions{
+			Token:               prefixer("PULSAR_TOKEN"),
+			TokenFile:           prefixer("PULSAR_TOKEN_FILE"),
+			User:                prefixer("PULSAR_USER"),
+			Password:            prefixer("PULSAR_PASSWORD"),
+			TLSLocation:         prefixer("PULSAR_TLS_LOCATION"),
+			TLSKeyLocation:      prefixer("PULSAR_TLS_KEY_LOCATION"),
+			TLSCaLocation:       prefixer("PULSAR_TLS_CA_LOCATION"),
+			TLSAllowInsecure:    helpers.ParseEnvBool(prefixer("PULSAR_TLS_ALLOW_INSECURE")),
+			TLSValidateHostname: helpers.ParseEnvBool(prefixer("PULSAR_TLS_VALIDATE_HOSTNAME")),
+		},
+	}
+	return config
+}
+
 func NewEnvKafkaConfig(prefix string) *EnvKafkaConfig {
 	var prefixer = newEnvPrefixer(prefix)
-	var config = &EnvKafkaConfig{}
-	config.Servers = helpers.ParseEnvSlice(prefixer("KAFKA_SERVERS"))
-	config.SecurityProtocol = prefixer("KAFKA_SECURITY_PROTOCOL")
-	config.Mechanism = prefixer("KAFKA_MECHANISM")
-	config.User = prefixer("KAFKA_USER")
-	config.Password = prefixer("KAFKA_PASSWORD")
-	config.SslCaLocation = prefixer("KAFKA_SSL_CA_LOCATION")
-	config.SslLocation = prefixer("KAFKA_SSL_LOCATION")
-	config.SslKeyLocation = prefixer("KAFKA_SSL_KEY_LOCATION")
-	config.KeytabPath = prefixer("KAFKA_KEYTAB_PATH")
-	config.Principal = prefixer("KAFKA_PRINCIPAL")
+	var config = &EnvKafkaConfig{
+		Servers: helpers.ParseEnvSlice(prefixer("KAFKA_SERVERS")),
+		SecurityOptions: queue.KafkaSecurityOptions{
+			SecurityProtocol: prefixer("KAFKA_SECURITY_PROTOCOL"),
+			TLSCaLocation:    prefixer("KAFKA_TLS_CA_LOCATION"),
+			TLSLocation:      prefixer("KAFKA_TLS_LOCATION"),
+			TLSKeyLocation:   prefixer("KAFKA_TLS_KEY_LOCATION"),
+			SASLMechanism:    prefixer("KAFKA_SASL_MECHANISM"),
+			SASLKeytabPath:   prefixer("KAFKA_SASL_KEYTAB_PATH"),
+			SASLPrincipal:    prefixer("KAFKA_SASL_PRINCIPAL"),
+			User:             prefixer("KAFKA_USER"),
+			Password:         prefixer("KAFKA_PASSWORD"),
+		},
+	}
 	return config
 }
 
 func NewEnvRedisConfig(prefix string) *EnvRedisConfig {
 	var prefixer = newEnvPrefixer(prefix)
-	var config = &EnvRedisConfig{}
-	config.Addresses = helpers.ParseEnvSlice(prefixer("REDIS_ADDRESSES"))
-	config.Username = prefixer("REDIS_USERNAME")
-	config.Password = prefixer("REDIS_PASSWORD")
-	config.Mode = prefixer("REDIS_MODE")
-	config.Db = 0
-	var redisDb = helpers.ParseEnvInt(prefixer("REDIS_DB"))
-	if redisDb != nil {
-		config.Db = *redisDb
+	var config = &EnvRedisConfig{
+		Addresses: helpers.ParseEnvSlice(prefixer("REDIS_ADDRESSES")),
+		Username:  prefixer("REDIS_USERNAME"),
+		Password:  prefixer("REDIS_PASSWORD"),
+		Mode:      prefixer("REDIS_MODE"),
+		DB:        helpers.IntFromPtr(helpers.ParseEnvInt(prefixer("REDIS_DB"))),
+		Master:    prefixer("REDIS_MASTER"),
 	}
-	config.Master = prefixer("REDIS_MASTER")
 	return config
 }
 
 func NewEnvPostgresConfig(prefix string) *EnvPostgresConfig {
 	var prefixer = newEnvPrefixer(prefix)
-	var config = &EnvPostgresConfig{}
-	config.Connection = prefixer("POSTGRES_CONNECTION")
+	var config = &EnvPostgresConfig{
+		Connection: prefixer("POSTGRES_CONNECTION"),
+	}
 	return config
 }
 
 func NewEnvClickHouseConfig(prefix string) *EnvClickHouseConfig {
 	var prefixer = newEnvPrefixer(prefix)
-	var config = &EnvClickHouseConfig{}
-	config.Connection = prefixer("CLICKHOUSE_CONNECTION")
+	var config = &EnvClickHouseConfig{
+		Connection: prefixer("CLICKHOUSE_CONNECTION"),
+	}
 	return config
 }
 
 func NewEnvMinioConfig(prefix string) *EnvMinioConfig {
 	var prefixer = newEnvPrefixer(prefix)
-	var config = &EnvMinioConfig{}
-	config.Address = prefixer("MINIO_ADDRESS")
-	config.AccessKey = prefixer("MINIO_ACCESS_KEY")
-	config.SecretKey = prefixer("MINIO_SECRET_KEY")
-	config.Location = prefixer("MINIO_LOCATION")
-	config.Secure = helpers.ParseEnvBool(prefixer("MINIO_SECURE"))
+	var config = &EnvMinioConfig{
+		Address:   prefixer("MINIO_ADDRESS"),
+		AccessKey: prefixer("MINIO_ACCESS_KEY"),
+		SecretKey: prefixer("MINIO_SECRET_KEY"),
+		Location:  prefixer("MINIO_LOCATION"),
+		Secure:    helpers.ParseEnvBool(prefixer("MINIO_SECURE")),
+	}
+
 	return config
 }
 

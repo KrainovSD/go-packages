@@ -96,19 +96,9 @@ func main() {
 	})
 	server.Hooks().OnResourceInit("kafka", 10*time.Second, func(ctx context.Context) (func(context.Context), error) {
 		var kq *kafka.Producer
-		if kq, err = queue.NewProducer(ctx, &queue.ProducerOptions{
-			Servers: conf.Default.Kafka.Servers,
-			SecurityOptions: queue.SecurityOptions{
-				SecurityProtocol: conf.Default.Kafka.SecurityProtocol,
-				User:             conf.Default.Kafka.User,
-				Password:         conf.Default.Kafka.Password,
-				Mechanism:        conf.Default.Kafka.Mechanism,
-				SslCaLocation:    conf.Default.Kafka.SslCaLocation,
-				SslLocation:      conf.Default.Kafka.SslLocation,
-				SslKeyLocation:   conf.Default.Kafka.SslKeyLocation,
-				KeytabPath:       conf.Default.Kafka.KeytabPath,
-				Principal:        conf.Default.Kafka.Principal,
-			},
+		if kq, err = queue.NewKafkaProducer(ctx, &queue.KafkaProducerOptions{
+			Servers:         conf.Default.Kafka.Servers,
+			SecurityOptions: conf.Default.Kafka.SecurityOptions,
 		}); err != nil {
 			return nil, err
 		}
@@ -125,7 +115,7 @@ func main() {
 			Password:   conf.Default.Redis.Password,
 			Mode:       conf.Default.Redis.Mode,
 			MasterName: conf.Default.Redis.Master,
-			DB:         conf.Default.Redis.Db,
+			DB:         conf.Default.Redis.DB,
 			Tracing:    server.Traces.Exist(),
 			Metrics:    server.Traces.Exist(),
 		}); err != nil {

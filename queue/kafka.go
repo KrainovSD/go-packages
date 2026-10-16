@@ -8,25 +8,30 @@ import (
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 )
 
-type SecurityOptions struct {
+type KafkaSecurityOptions struct {
 	SecurityProtocol string // SSL, SASL_SSL, SASL_PLAINTEXT, PLAINTEXT
-	SslCaLocation    string
-	SslLocation      string
-	SslKeyLocation   string
-	Mechanism        string // GSSAPI, PLAIN
-	KeytabPath       string
-	Principal        string
+	TLSCaLocation    string
+	TLSLocation      string
+	TLSKeyLocation   string
+	SASLMechanism    string // GSSAPI, PLAIN
+	SASLKeytabPath   string
+	SASLPrincipal    string
 	User             string
 	Password         string
 }
 
-type ProducerOptions struct {
-	SecurityOptions SecurityOptions
-	Servers         []string
-	Linger          int
+type KafkaProducerOptions struct {
+	SecurityOptions    KafkaSecurityOptions
+	Servers            []string
+	Linger             int
+	Compression        string
+	DisableIdempotence bool
+	MessageTimeoutMs   int
+	RequestTimeoutMs   int
+	ClientID           string
 }
 
-func NewProducer(ctx context.Context, opts *ProducerOptions) (*kafka.Producer, error) {
+func NewKafkaProducer(ctx context.Context, opts *KafkaProducerOptions) (*kafka.Producer, error) {
 	var linger = 5
 	if opts.Linger != 0 {
 		linger = opts.Linger
@@ -34,11 +39,24 @@ func NewProducer(ctx context.Context, opts *ProducerOptions) (*kafka.Producer, e
 	var cm = &kafka.ConfigMap{
 		"bootstrap.servers":  strings.Join(opts.Servers, ","),
 		"linger.ms":          linger,
-		"compression.type":   "zstd",
-		"request.timeout.ms": 15000,
-		"message.timeout.ms": 60000,
 		"enable.idempotence": true,
-		"acks":               "all",
+		"compression.type":   "zstd",
+	}
+	if opts.Compression != "" {
+		cm.SetKey("compression.type", strings.ToLower(opts.Compression))
+	}
+	if opts.MessageTimeoutMs != 0 {
+		cm.SetKey("message.timeout.ms", opts.MessageTimeoutMs)
+	}
+	if opts.RequestTimeoutMs != 0 {
+		cm.SetKey("request.timeout.ms", opts.RequestTimeoutMs)
+	}
+	if opts.DisableIdempotence {
+		cm.SetKey("acks", "1")
+		cm.SetKey("enable.idempotence", false)
+	}
+	if opts.ClientID != "" {
+		cm.SetKey("client.id", opts.ClientID)
 	}
 	applySecurity(cm, &opts.SecurityOptions)
 	var producer *kafka.Producer
@@ -49,15 +67,16 @@ func NewProducer(ctx context.Context, opts *ProducerOptions) (*kafka.Producer, e
 	return producer, nil
 }
 
-type ConsumerOptions struct {
-	SecurityOptions SecurityOptions
+type KafkaConsumerOptions struct {
+	SecurityOptions KafkaSecurityOptions
 	Servers         []string
 	ConsumerGroup   string
 	ConsumeTopics   []string
 	AutoOffsetReset string // earliest, latest
+	ClientID        string
 }
 
-func NewConsumer(ctx context.Context, opts *ConsumerOptions) (*kafka.Consumer, error) {
+func NewKafkaConsumer(ctx context.Context, opts *KafkaConsumerOptions) (*kafka.Consumer, error) {
 	var cm = &kafka.ConfigMap{
 		"bootstrap.servers":  strings.Join(opts.Servers, ","),
 		"group.id":           opts.ConsumerGroup,
@@ -65,6 +84,9 @@ func NewConsumer(ctx context.Context, opts *ConsumerOptions) (*kafka.Consumer, e
 	}
 	if opts.AutoOffsetReset != "" {
 		cm.SetKey("auto.offset.reset", strings.ToLower(opts.AutoOffsetReset))
+	}
+	if opts.ClientID != "" {
+		cm.SetKey("client.id", opts.ClientID)
 	}
 	applySecurity(cm, &opts.SecurityOptions)
 	var consumer *kafka.Consumer
@@ -80,27 +102,27 @@ func NewConsumer(ctx context.Context, opts *ConsumerOptions) (*kafka.Consumer, e
 	return consumer, nil
 }
 
-func applySecurity(cm *kafka.ConfigMap, s *SecurityOptions) {
+func applySecurity(cm *kafka.ConfigMap, s *KafkaSecurityOptions) {
 	if s.SecurityProtocol != "" {
 		cm.SetKey("security.protocol", strings.ToUpper(s.SecurityProtocol))
 	}
-	if s.SslCaLocation != "" {
-		cm.SetKey("ssl.ca.location", s.SslCaLocation)
+	if s.TLSCaLocation != "" {
+		cm.SetKey("ssl.ca.location", s.TLSCaLocation)
 	}
-	if s.Mechanism != "" {
-		cm.SetKey("sasl.mechanism", strings.ToUpper(s.Mechanism))
+	if s.SASLMechanism != "" {
+		cm.SetKey("sasl.mechanism", strings.ToUpper(s.SASLMechanism))
 	}
-	if s.KeytabPath != "" {
-		cm.SetKey("sasl.kerberos.keytab", s.KeytabPath)
+	if s.SASLKeytabPath != "" {
+		cm.SetKey("sasl.kerberos.keytab", s.SASLKeytabPath)
 	}
-	if s.Principal != "" {
-		cm.SetKey("sasl.kerberos.principal", s.Principal)
+	if s.SASLPrincipal != "" {
+		cm.SetKey("sasl.kerberos.principal", s.SASLPrincipal)
 	}
-	if s.SslLocation != "" {
-		cm.SetKey("ssl.certificate.location", s.SslLocation)
+	if s.TLSLocation != "" {
+		cm.SetKey("ssl.certificate.location", s.TLSLocation)
 	}
-	if s.SslKeyLocation != "" {
-		cm.SetKey("ssl.key.location", s.SslKeyLocation)
+	if s.TLSKeyLocation != "" {
+		cm.SetKey("ssl.key.location", s.TLSKeyLocation)
 	}
 	if s.User != "" {
 		cm.SetKey("sasl.username", s.User)
