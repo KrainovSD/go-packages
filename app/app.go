@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"strconv"
 	"syscall"
 	"time"
@@ -238,9 +239,9 @@ func (a *App) Start() {
 		}
 		a.cancelShutdownSignal()
 		a.BgWorker.Stop()
-		for _, c := range a.hooks.cleanup {
-			var cleanCtx, cancelCleanCtx = context.WithTimeout(ctx, c.Duration)
-			c.Fn(cleanCtx)
+		for _, cleaner := range slices.Backward(a.hooks.cleanup) {
+			var cleanCtx, cancelCleanCtx = context.WithTimeout(ctx, cleaner.Duration)
+			cleaner.Fn(cleanCtx)
 			cancelCleanCtx()
 		}
 		for _, postShutdownFn := range a.hooks.onPostShutdown {
