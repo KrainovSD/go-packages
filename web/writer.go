@@ -1,8 +1,12 @@
 package web
 
 import (
+	"bufio"
 	"compress/gzip"
+	"fmt"
+	"io"
 	"log/slog"
+	"net"
 	"net/http"
 )
 
@@ -176,6 +180,75 @@ func (w *ResponseWriter) finalize() {
 	}
 	w.state = stateFinalized
 	w.buffer = nil
+}
+
+func (w *ResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	var hijacker, ok = w.originalWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, fmt.Errorf("web: original writer %T does not implement http.Hijacker (protocol upgrades require HTTP/1.1)", w.originalWriter)
+	}
+	var conn net.Conn
+	var buf *bufio.ReadWriter
+	var err error
+	if conn, buf, err = hijacker.Hijack(); err != nil {
+		return nil, nil, err
+	}
+	w.buffer = nil
+	w.compressWriter = nil
+	w.status = http.StatusSwitchingProtocols
+	w.closedHeader = true
+	w.state = stateFinalized
+	return conn, buf, nil
+}
+
+func (w *ResponseWriter) Flush() {
+	if w.state == stateFinalized {
+		return
+	}
+	switch w.state {
+	case statePending:
+		if w.status == 0 {
+			w.status = http.StatusOK
+		}
+		w.state = stateStreaming
+		w.writeHeader()
+	case stateBuffering:
+		w.state = stateStreaming
+		w.writeHeader()
+		if len(w.buffer) > 0 {
+			w.originalWriter.Write(w.buffer)
+		}
+	case stateStreaming:
+		if w.compressWriter != nil {
+			w.compressWriter.Flush()
+		}
+	}
+	w.buffer = nil
+	if flusher, ok := w.originalWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+type writerOnly struct {
+	io.Writer
+}
+
+func (w *ResponseWriter) ReadFrom(r io.Reader) (int64, error) {
+	if w.state == stateFinalized {
+		return 0, nil
+	}
+	w.WriteHeader(http.StatusOK)
+	if w.state != stateStreaming || w.compressWriter != nil {
+		return io.Copy(writerOnly{w}, r)
+	}
+	if readerFrom, ok := w.originalWriter.(io.ReaderFrom); ok {
+		return readerFrom.ReadFrom(r)
+	}
+	return io.Copy(w.originalWriter, r)
+}
+
+func (w *ResponseWriter) Unwrap() http.ResponseWriter {
+	return w.originalWriter
 }
 
 func (w *ResponseWriter) Status() int {
