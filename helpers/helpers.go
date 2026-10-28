@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"runtime"
@@ -163,4 +164,21 @@ func LimitWork(pctx context.Context, limit time.Duration, fn func(ctx context.Co
 	case err := <-errCh:
 		return err
 	}
+}
+
+func SafeWork(fn func()) (err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			switch e := p.(type) {
+			case error:
+				err = e
+			case string:
+				err = errors.New(e)
+			default:
+				err = fmt.Errorf("%v", e)
+			}
+		}
+	}()
+	fn()
+	return
 }

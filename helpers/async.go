@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 )
 
 var AsyncFilterError = errors.New("async filter error")
@@ -110,4 +111,76 @@ func AsyncWork(maxWorker int, workLen int, work func(i int) error) error {
 	}
 
 	return err
+}
+
+type SerializedDebounceWorker[T any] struct {
+	fn     func(T)
+	jobs   chan T
+	done   chan struct{}
+	closed bool
+	mu     sync.Mutex
+	wg     sync.WaitGroup
+}
+
+func NewSerializedDebounceWorker[T any](fn func(T), delay time.Duration) *SerializedDebounceWorker[T] {
+	var worker = &SerializedDebounceWorker[T]{
+		fn:   fn,
+		jobs: make(chan T, 1),
+		done: make(chan struct{}),
+	}
+	worker.wg.Go(func() {
+		var timer *time.Timer
+		var timerC <-chan time.Time
+		var arg T
+		var hasArg bool
+		for {
+			select {
+			case <-worker.done:
+				if timer != nil {
+					timer.Stop()
+				}
+				return
+			case arg = <-worker.jobs:
+				hasArg = true
+				if timer != nil {
+					timer.Stop()
+				}
+				timer = time.NewTimer(delay)
+				timerC = timer.C
+			case <-timerC:
+				timerC = nil
+				timer = nil
+				if hasArg {
+					fn(arg)
+					hasArg = false
+				}
+			}
+		}
+	})
+	return worker
+}
+
+func (w *SerializedDebounceWorker[T]) Do(arg T) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.closed {
+		return false
+	}
+	select {
+	case w.jobs <- arg:
+	default:
+		<-w.jobs
+		w.jobs <- arg
+	}
+	return true
+}
+
+func (w *SerializedDebounceWorker[T]) Close() {
+	w.mu.Lock()
+	if !w.closed {
+		w.closed = true
+		close(w.done)
+	}
+	w.mu.Unlock()
+	w.wg.Wait()
 }

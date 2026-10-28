@@ -5,6 +5,7 @@ go 1.26.8
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.48.0
 	github.com/apache/pulsar-client-go v0.21.0
+	github.com/coder/websocket v1.8.15
 	github.com/confluentinc/confluent-kafka-go/v2 v2.15.1
 	github.com/coreos/go-oidc/v3 v3.21.0
 	github.com/jackc/pgx/v5 v5.11.0
@@ -12,6 +13,7 @@ require (
 	github.com/prometheus/client_golang v1.24.1
 	github.com/redis/go-redis/extra/redisotel/v9 v9.22.0
 	github.com/redis/go-redis/v9 v9.22.0
+	github.com/reearth/ygo v1.54.0
 	github.com/shopspring/decimal v1.4.0
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.71.0
 	go.opentelemetry.io/otel v1.46.0
