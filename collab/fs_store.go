@@ -9,29 +9,77 @@ import (
 )
 
 type FSStore struct {
-	path string
-	log  *slog.Logger
+	fsync bool
+	path  string
+	log   *slog.Logger
 }
 
-func NewFSStore(path string, log *slog.Logger) (*FSStore, error) {
+func NewFSStore(path string, fsync bool, log *slog.Logger) (*FSStore, error) {
 	if log == nil {
-		return nil, fmt.Errorf("logger is required")
+		return nil, errors.New("logger is required")
+	}
+	if !filepath.IsLocal(path) {
+		return nil, errors.New("invalid path: must be local and relative")
 	}
 	if err := os.MkdirAll(path, 0o755); err != nil {
 		return nil, fmt.Errorf("create state folder: %w", err)
 	}
-	return &FSStore{path: path, log: log}, nil
+	return &FSStore{path: path, log: log, fsync: fsync}, nil
 }
 
 func (s *FSStore) Write(name string, content []byte) {
 	var filename = filepath.Join(s.path, name+".bin")
-	var tmp = filename + ".tmp"
-	if err := os.WriteFile(tmp, content, 0o644); err != nil {
-		s.log.Error("write state", "error", err, "name", name)
-		return
-	}
-	if err := os.Rename(tmp, filename); err != nil {
-		s.log.Error("write state", "error", err, "name", name)
+	if s.fsync {
+		var tmp *os.File
+		var err error
+		if tmp, err = os.CreateTemp(s.path, ".tmp-*"); err != nil {
+			s.log.Error("write state: create temp", "error", err, "name", name)
+			return
+		}
+		var tmpName = tmp.Name()
+		defer func() {
+			tmp.Close()
+			if tmpName != "" {
+				os.Remove(tmpName)
+			}
+		}()
+		if err = tmp.Chmod(0o644); err != nil {
+			s.log.Error("write state: cmod", "error", err, "name", name)
+			return
+		}
+		if _, err = tmp.Write(content); err != nil {
+			s.log.Error("write state: write", "error", err, "name", name)
+			return
+		}
+		if err = tmp.Sync(); err != nil {
+			s.log.Error("write state: sync", "error", err, "name", name)
+			return
+		}
+		if err = tmp.Close(); err != nil {
+			s.log.Error("write state: close", "error", err, "name", name)
+			return
+		}
+		if err = os.Rename(tmpName, filename); err != nil {
+			s.log.Error("write state: rename", "error", err, "name", name)
+			return
+		}
+		tmpName = ""
+	} else {
+		var tmp = filename + ".tmp"
+		defer func() {
+			if tmp != "" {
+				os.Remove(tmp)
+			}
+		}()
+		if err := os.WriteFile(tmp, content, 0o644); err != nil {
+			s.log.Error("write state: write", "error", err, "name", name)
+			return
+		}
+		if err := os.Rename(tmp, filename); err != nil {
+			s.log.Error("write state: rename", "error", err, "name", name)
+			return
+		}
+		tmp = ""
 	}
 }
 

@@ -12,3 +12,5 @@ dev:
 	swag init -g ./internal/main.go -o ./internal/docs 
 	$(RM) $(DOC_FILE) 
 	$(AIR)
+test:
+	go test -race ./...

@@ -7,6 +7,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/KrainovSD/go-packages/helpers"
 )
 
 type Callbacks struct {
@@ -70,16 +72,16 @@ func (o *Options) newDefault() {
 }
 
 type Collab struct {
-	doc      DocumentService
-	store    StateStore
-	log      *slog.Logger
-	settings *Settings
-	cb       *Callbacks
-	mutexes  *mutexStore
-	mu       sync.RWMutex
-	rooms    map[string]*room
-	wgclose  sync.WaitGroup
-	closed   atomic.Bool
+	doc         DocumentService
+	store       StateStore
+	log         *slog.Logger
+	settings    *Settings
+	cb          *Callbacks
+	mutexes     *mutexStore
+	mu          sync.RWMutex
+	rooms       map[string]*room
+	wgRoomClose sync.WaitGroup
+	closed      atomic.Bool
 }
 
 func New(opts *Options) (*Collab, error) {
@@ -114,10 +116,11 @@ func (c *Collab) Close(ctx context.Context) {
 	c.mu.Unlock()
 	var done = make(chan struct{})
 	go func() {
-		for _, room := range rooms {
-			room.close()
-		}
-		c.wgclose.Wait()
+		helpers.AsyncWork(helpers.GetMaxThreads(), len(rooms), func(i int) error {
+			rooms[i].close()
+			return nil
+		})
+		c.wgRoomClose.Wait()
 		close(done)
 	}()
 	select {

@@ -169,7 +169,7 @@ func (r *room) close() {
 	if !r.closed.CompareAndSwap(false, true) {
 		return
 	}
-	r.c.wgclose.Go(func() {
+	r.c.wgRoomClose.Go(func() {
 		r.saveWorker.close()
 		r.c.mutexes.lock(r.name)
 		defer r.c.mutexes.unlock(r.name)

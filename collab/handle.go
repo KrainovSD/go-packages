@@ -20,7 +20,7 @@ func (c *Collab) Handle() http.HandlerFunc {
 		var err error
 		if err = c.doc.Auth(r.Context(), name, r); err != nil {
 			c.log.Error("verify client", "error", err, "url", url)
-			http.Error(w, "verify failed", http.StatusFailedDependency)
+			http.Error(w, "verify failed", http.StatusForbidden)
 			return
 		}
 		if c.closed.Load() {

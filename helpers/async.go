@@ -169,7 +169,10 @@ func (w *SerializedDebounceWorker[T]) Do(arg T) bool {
 	select {
 	case w.jobs <- arg:
 	default:
-		<-w.jobs
+		select {
+		case <-w.jobs:
+		default:
+		}
 		w.jobs <- arg
 	}
 	return true

@@ -64,7 +64,10 @@ func (w *serializedDebounceIntervalWorker) do() bool {
 	select {
 	case w.jobs <- struct{}{}:
 	default:
-		<-w.jobs
+		select {
+		case <-w.jobs:
+		default:
+		}
 		w.jobs <- struct{}{}
 	}
 	return true
