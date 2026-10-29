@@ -133,8 +133,8 @@ func newRooms() *rooms {
 }
 
 func (r *rooms) val() []*room {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	var rooms = make([]*room, 0, len(r.raw))
 	for _, room := range r.raw {
 		rooms = append(rooms, room)

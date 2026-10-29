@@ -67,7 +67,7 @@ func newRoom(c *Collab, name string, document string, snapshot []byte) *room {
 		r.dirty.Store(true)
 		r.saveWorker.do()
 	})
-	r.aw.OnChange(func(evt awareness.ChangeEvent) {
+	r.aw.OnUpdate(func(evt awareness.UpdateEvent) {
 		if cn, ok := evt.Origin.(*conn); ok {
 			r.mu.Lock()
 			if ids, active := r.conns[cn]; active {
