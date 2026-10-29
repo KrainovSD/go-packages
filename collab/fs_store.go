@@ -28,6 +28,10 @@ func NewFSStore(path string, fsync bool, log *slog.Logger) (*FSStore, error) {
 }
 
 func (s *FSStore) Write(name string, content []byte) {
+	if !filepath.IsLocal(name) {
+		s.log.Error("write state: name not local path", "name", name)
+		return
+	}
 	var filename = filepath.Join(s.path, name+".bin")
 	if s.fsync {
 		var tmp *os.File
@@ -84,6 +88,10 @@ func (s *FSStore) Write(name string, content []byte) {
 }
 
 func (s *FSStore) Read(name string) []byte {
+	if !filepath.IsLocal(name) {
+		s.log.Error("read state: name not local path", "name", name)
+		return nil
+	}
 	var content, err = os.ReadFile(filepath.Join(s.path, name+".bin"))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -96,6 +104,10 @@ func (s *FSStore) Read(name string) []byte {
 }
 
 func (s *FSStore) Delete(name string) {
+	if !filepath.IsLocal(name) {
+		s.log.Error("delete state: name not local path", "name", name)
+		return
+	}
 	var err = os.Remove(filepath.Join(s.path, name+".bin"))
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		s.log.Error("delete state", "error", err, "name", name)

@@ -37,7 +37,7 @@ func (cn *conn) send(frame []byte) bool {
 	case cn.out <- frame:
 		return true
 	default:
-		cn.close(websocket.StatusMessageTooBig, "slow consumer")
+		go cn.close(websocket.StatusMessageTooBig, "slow consumer")
 		return false
 	}
 }

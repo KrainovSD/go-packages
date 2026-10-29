@@ -150,9 +150,12 @@ func TruncateString(str string, length int) string {
 	return string(r[:length])
 }
 
-func LimitWork(pctx context.Context, limit time.Duration, fn func(ctx context.Context) error) error {
-	var ctx, cancel = context.WithTimeout(pctx, limit)
-	defer cancel()
+func LimitWork(ctx context.Context, limit time.Duration, fn func(ctx context.Context) error) error {
+	if limit != 0 {
+		var cancel func()
+		ctx, cancel = context.WithTimeout(ctx, limit)
+		defer cancel()
+	}
 	var errCh = make(chan error, 1)
 	go func() {
 		defer close(errCh)
@@ -166,7 +169,7 @@ func LimitWork(pctx context.Context, limit time.Duration, fn func(ctx context.Co
 	}
 }
 
-func SafeWork(fn func()) (err error) {
+func SafeWork(fn func() error) (err error) {
 	defer func() {
 		if p := recover(); p != nil {
 			switch e := p.(type) {
@@ -179,6 +182,5 @@ func SafeWork(fn func()) (err error) {
 			}
 		}
 	}()
-	fn()
-	return
+	return fn()
 }

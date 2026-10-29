@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/KrainovSD/go-packages/helpers"
@@ -79,61 +78,92 @@ type Collab struct {
 	cb          *Callbacks
 	mutexes     *mutexStore
 	mu          sync.RWMutex
-	rooms       map[string]*room
+	rooms       *rooms
 	wgRoomClose sync.WaitGroup
-	closed      atomic.Bool
+	closed      bool
 }
 
-func New(opts *Options) (*Collab, error) {
-	if opts == nil {
+func New(optsPtr *Options) (*Collab, error) {
+	if optsPtr == nil {
 		return nil, fmt.Errorf("collab: options must be passed")
 	}
+	var opts = *optsPtr
 	if err := opts.validate(); err != nil {
 		return nil, err
 	}
 	opts.newDefault()
-	var c = &Collab{
+	return &Collab{
 		doc:      opts.Doc,
 		store:    opts.Store,
 		log:      opts.Log,
 		settings: &opts.Settings,
 		cb:       &opts.Callbacks,
 		mutexes:  newMutexStore(),
-		rooms:    make(map[string]*room, 1024),
-	}
-	return c, nil
+		rooms:    newRooms(),
+	}, nil
 }
 
 func (c *Collab) Close(ctx context.Context) {
-	if !c.closed.CompareAndSwap(false, true) {
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
 		return
 	}
-	c.mu.Lock()
-	var rooms = make([]*room, 0, len(c.rooms))
-	for _, rm := range c.rooms {
-		rooms = append(rooms, rm)
-	}
+	c.closed = true
 	c.mu.Unlock()
-	var done = make(chan struct{})
-	go func() {
+	var rooms = c.rooms.val()
+	helpers.LimitWork(ctx, 0, func(ctx context.Context) error {
 		helpers.AsyncWork(helpers.GetMaxThreads(), len(rooms), func(i int) error {
 			rooms[i].close()
 			return nil
 		})
 		c.wgRoomClose.Wait()
-		close(done)
-	}()
-	select {
-	case <-done:
-	case <-ctx.Done():
-	}
-
+		return nil
+	})
 }
 
-func (c *Collab) removeRoom(name string, rm *room) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.rooms[name] == rm {
-		delete(c.rooms, name)
+type rooms struct {
+	mu  sync.RWMutex
+	raw map[string]*room
+}
+
+func newRooms() *rooms {
+	var r = &rooms{raw: make(map[string]*room, 1024)}
+	return r
+}
+
+func (r *rooms) val() []*room {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var rooms = make([]*room, 0, len(r.raw))
+	for _, room := range r.raw {
+		rooms = append(rooms, room)
 	}
+	return rooms
+}
+
+func (r *rooms) get(name string) *room {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var room, ok = r.raw[name]
+	if !ok {
+		return nil
+	}
+	return room
+}
+
+func (r *rooms) set(name string, rm *room) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.raw[name] = rm
+}
+
+func (r *rooms) delete(name string, rm *room) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var current, ok = r.raw[name]
+	if !ok || current != rm {
+		return
+	}
+	delete(r.raw, name)
 }

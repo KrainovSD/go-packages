@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/KrainovSD/go-packages/helpers"
 	"github.com/coder/websocket"
 	"github.com/reearth/ygo/awareness"
 	"github.com/reearth/ygo/crdt"
@@ -26,12 +27,12 @@ type room struct {
 	mu         sync.Mutex
 	conns      map[*conn]map[uint64]struct{}
 	closed     atomic.Bool
+	dirty      atomic.Bool
 	wgReaders  sync.WaitGroup
 }
 
-func newRoom(c *Collab, name string, document string) *room {
+func newRoom(c *Collab, name string, document string, snapshot []byte) *room {
 	var doc = crdt.New(crdt.WithGC(true), crdt.WithClientID(crdt.NewClientID()))
-	var snapshot = c.store.Read(name)
 	if snapshot != nil {
 		if err := crdt.ApplyUpdateV1(doc, snapshot, nil); err != nil {
 			c.log.Error("apply snapshot", "error", err, "name", name)
@@ -54,15 +55,16 @@ func newRoom(c *Collab, name string, document string) *room {
 		conns: make(map[*conn]map[uint64]struct{}),
 	}
 	r.saveWorker = newSerializedDebounceIntervalWorker(func() {
-		if r.closed.Load() {
+		if r.closed.Load() || !r.dirty.Swap(false) {
 			return
 		}
 		c.mutexes.lock(name)
+		defer c.mutexes.unlock(name)
 		c.store.Write(name, r.doc.EncodeStateAsUpdate())
-		c.mutexes.unlock(name)
 	}, 5*time.Second, c.settings.SaveInterval)
 	doc.OnUpdate(func(update []byte, _ any) {
 		r.broadcast(syncFrame(ysync.EncodeUpdate(update)))
+		r.dirty.Store(true)
 		r.saveWorker.do()
 	})
 	r.aw.OnChange(func(evt awareness.ChangeEvent) {
@@ -179,14 +181,15 @@ func (r *room) close() {
 			conns = append(conns, cn)
 		}
 		r.mu.Unlock()
-		for _, cn := range conns {
-			cn.close(websocket.StatusGoingAway, "")
-		}
+		helpers.AsyncWork(helpers.GetMaxThreads(), len(conns), func(i int) error {
+			conns[i].close(websocket.StatusGoingAway, "")
+			return nil
+		})
 		r.wgReaders.Wait()
 		if r.c.cb.OnCloseRoom != nil {
 			r.c.cb.OnCloseRoom(r.name)
 		}
-		r.c.removeRoom(r.name, r)
+		r.c.rooms.delete(r.name, r)
 		r.aw.Destroy()
 		var content = r.text.ToString()
 		var err = r.c.doc.Save(context.Background(), r.name, content)

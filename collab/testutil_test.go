@@ -138,10 +138,7 @@ func newTestCollab(t *testing.T, doc *mockDoc, store *mockStore) *Collab {
 
 func newTestRoom(t *testing.T, c *Collab, name, document string, snapshot []byte) *room {
 	t.Helper()
-	if snapshot != nil {
-		c.store.Write(name, snapshot)
-	}
-	var r = newRoom(c, name, document)
+	var r = newRoom(c, name, document, snapshot)
 	r.saveWorker.close()
 	r.saveWorker = newSerializedDebounceIntervalWorker(func() {
 		if r.closed.Load() {
@@ -191,10 +188,8 @@ func waitForRoomFinalized(t *testing.T, c *Collab, name string) {
 	}
 	var deadline = time.Now().Add(5 * time.Second)
 	for {
-		c.mu.RLock()
-		var _, ok = c.rooms[name]
-		c.mu.RUnlock()
-		if !ok && len(currentDoc.saveContents(t)) > 0 && ((currentStore.deleteCount(t) > 0 && len(currentStore.snapshot(t, name)) == 0) || (currentStore.writeCount(t) > 0 && len(currentStore.snapshot(t, name)) > 0)) {
+		var room = c.rooms.get(name)
+		if room == nil && len(currentDoc.saveContents(t)) > 0 && ((currentStore.deleteCount(t) > 0 && len(currentStore.snapshot(t, name)) == 0) || (currentStore.writeCount(t) > 0 && len(currentStore.snapshot(t, name)) > 0)) {
 			return
 		}
 		if time.Now().After(deadline) {

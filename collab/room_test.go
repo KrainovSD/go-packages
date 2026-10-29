@@ -163,7 +163,7 @@ func TestRoomCloseWritesStoreOnSaveError(t *testing.T) {
 
 func TestRoomCloseSaveWorkerNoDeadlock(t *testing.T) {
 	var c = newTestCollab(t, nil, nil)
-	var r = newRoom(c, "doc1", "hello")
+	var r = newRoom(c, "doc1", "hello", nil)
 	t.Cleanup(func() { r.aw.Destroy() })
 	r.saveWorker.close()
 	var passed = make(chan struct{})
@@ -291,12 +291,19 @@ func TestRoomSaveIntervalDrivesPeriodicSave(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	var r = newRoom(c, "doc1", "hello")
+	var r = newRoom(c, "doc1", "hello", nil)
 	t.Cleanup(func() { r.saveWorker.close(); r.aw.Destroy() })
+	r.doc.Transact(func(txn *crdt.Transaction) {
+		r.text.Insert(txn, 5, " world", nil)
+	}, nil)
 	var deadline = time.Now().Add(2 * time.Second)
 	for {
-		if store.snapshot(t, "doc1") != nil {
-			return
+		var snap = store.snapshot(t, "doc1")
+		if snap != nil {
+			var dec = crdt.New(crdt.WithClientID(1))
+			if err := crdt.ApplyUpdateV1(dec, snap, nil); err == nil && dec.GetText(textName).ToString() == "hello world" {
+				return
+			}
 		}
 		if time.Now().After(deadline) {
 			t.Fatal("periodic save did not fire within SaveInterval")
@@ -363,7 +370,11 @@ func TestConnSendSlowConsumer(t *testing.T) {
 	if cn.send([]byte{1}) {
 		t.Fatal("send must fail when the out buffer is full")
 	}
-	if !cn.closed.Load() {
-		t.Fatal("conn must be closed as a slow consumer")
+	var deadline = time.Now().Add(time.Second)
+	for !cn.closed.Load() {
+		if time.Now().After(deadline) {
+			t.Fatal("conn must be closed as a slow consumer")
+		}
+		time.Sleep(time.Millisecond)
 	}
 }

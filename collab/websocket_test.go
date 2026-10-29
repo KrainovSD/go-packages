@@ -27,9 +27,7 @@ func TestCollabEndToEndSync(t *testing.T) {
 	var docB = syncClient(t, connB, 101, "hello")
 	sendClientUpdate(t, connA, docA, 5, " world")
 	readClientUpdate(t, connB, docB, "hello world")
-	c.mu.RLock()
-	var rm = c.rooms["room1"]
-	c.mu.RUnlock()
+	var rm = c.rooms.get("room1")
 	if rm == nil {
 		t.Fatal("room room1 not found")
 	}
@@ -71,10 +69,8 @@ func waitForRoomText(t *testing.T, c *Collab, name, want string) {
 	t.Helper()
 	var deadline = time.Now().Add(5 * time.Second)
 	for {
-		c.mu.RLock()
-		var rm = c.rooms[name]
-		c.mu.RUnlock()
-		if rm != nil && rm.text.ToString() == want {
+		var room = c.rooms.get(name)
+		if room != nil && room.text.ToString() == want {
 			return
 		}
 		if time.Now().After(deadline) {

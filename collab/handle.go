@@ -23,10 +23,13 @@ func (c *Collab) Handle() http.HandlerFunc {
 			http.Error(w, "verify failed", http.StatusForbidden)
 			return
 		}
-		if c.closed.Load() {
+		c.mu.RLock()
+		if c.closed {
+			c.mu.RUnlock()
 			http.Error(w, "service is closing", http.StatusConflict)
 			return
 		}
+		c.mu.RUnlock()
 		var ws *websocket.Conn
 		if ws, err = websocket.Accept(w, r, &websocket.AcceptOptions{OriginPatterns: c.settings.Origins}); err != nil {
 			c.log.Error("accept connection", "error", err, "url", url)
@@ -37,15 +40,11 @@ func (c *Collab) Handle() http.HandlerFunc {
 }
 
 func (c *Collab) join(name string, ws *websocket.Conn, r *http.Request) {
-	c.mu.RLock()
-	var room = c.rooms[name]
-	c.mu.RUnlock()
+	var room = c.rooms.get(name)
 	var first = false
 	if room == nil {
 		c.mutexes.lock(name)
-		c.mu.RLock()
-		room = c.rooms[name]
-		c.mu.RUnlock()
+		room = c.rooms.get(name)
 		if room == nil {
 			var err error
 			var document string
@@ -54,16 +53,18 @@ func (c *Collab) join(name string, ws *websocket.Conn, r *http.Request) {
 				ws.Close(websocket.StatusInternalError, "can't get document")
 				return
 			}
+			var snapshot = c.store.Read(name)
+			room = newRoom(c, name, document, snapshot)
 			c.mu.Lock()
-			if c.closed.Load() {
+			if c.closed {
 				c.mu.Unlock()
 				c.mutexes.unlock(name)
+				room.close()
 				ws.Close(websocket.StatusGoingAway, "")
 				return
 			}
-			room = newRoom(c, name, document)
 			first = true
-			c.rooms[name] = room
+			c.rooms.set(name, room)
 			c.mu.Unlock()
 		}
 		c.mutexes.unlock(name)
