@@ -18,7 +18,8 @@ func (c *Collab) Handle() http.HandlerFunc {
 			return
 		}
 		var err error
-		if err = c.doc.Auth(r.Context(), name, r); err != nil {
+		var userId string
+		if userId, err = c.doc.Auth(r.Context(), name, r); err != nil {
 			c.log.Error("verify client", "error", err, "url", url)
 			http.Error(w, "verify failed", http.StatusForbidden)
 			return
@@ -35,11 +36,11 @@ func (c *Collab) Handle() http.HandlerFunc {
 			c.log.Error("accept connection", "error", err, "url", url)
 			return
 		}
-		c.join(name, ws, r)
+		c.join(name, userId, ws, r)
 	}
 }
 
-func (c *Collab) join(name string, ws *websocket.Conn, r *http.Request) {
+func (c *Collab) join(name, userId string, ws *websocket.Conn, r *http.Request) {
 	var room = c.rooms.get(name)
 	var first = false
 	if room == nil {
@@ -70,7 +71,7 @@ func (c *Collab) join(name string, ws *websocket.Conn, r *http.Request) {
 		c.mutexes.unlock(name)
 	}
 
-	var cn = newConn(ws, room, r)
+	var cn = newConn(ws, room, r, userId)
 	if !room.join(cn) {
 		ws.Close(websocket.StatusGoingAway, "")
 		return

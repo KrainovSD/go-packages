@@ -17,18 +17,20 @@ type conn struct {
 	ws     *websocket.Conn
 	room   *room
 	req    *http.Request
+	userId string
 	out    chan []byte
 	closed atomic.Bool
 	done   chan struct{}
 }
 
-func newConn(ws *websocket.Conn, room *room, req *http.Request) *conn {
+func newConn(ws *websocket.Conn, room *room, req *http.Request, userId string) *conn {
 	return &conn{
-		ws:   ws,
-		room: room,
-		req:  req,
-		out:  make(chan []byte, frameQueueSize),
-		done: make(chan struct{}),
+		ws:     ws,
+		room:   room,
+		req:    req,
+		userId: userId,
+		out:    make(chan []byte, frameQueueSize),
+		done:   make(chan struct{}),
 	}
 }
 

@@ -122,6 +122,29 @@ func (c *Collab) Close(ctx context.Context) {
 	})
 }
 
+func (c *Collab) GetRooms(userId string) []string {
+	var found []string
+	for _, rm := range c.rooms.val() {
+		rm.mu.Lock()
+		for cn := range rm.conns {
+			if cn.userId == userId {
+				found = append(found, rm.name)
+				break
+			}
+		}
+		rm.mu.Unlock()
+	}
+	return found
+}
+
+func (c *Collab) GetContent(roomId string) []byte {
+	var rm = c.rooms.get(roomId)
+	if rm == nil {
+		return nil
+	}
+	return []byte(rm.text.ToString())
+}
+
 type rooms struct {
 	mu  sync.RWMutex
 	raw map[string]*room

@@ -1,11 +1,13 @@
 package collab
 
 import (
+	"cmp"
 	"context"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -20,7 +22,7 @@ type mockDoc struct {
 	mu          sync.Mutex
 	extractName func(string) (string, bool)
 	get         func(context.Context, string, *http.Request) (string, error)
-	auth        func(context.Context, string, *http.Request) error
+	auth        func(context.Context, string, *http.Request) (string, error)
 	save        func(context.Context, string, string) error
 	saveCalls   []string
 }
@@ -40,11 +42,11 @@ func (m *mockDoc) Get(ctx context.Context, name string, r *http.Request) (string
 	return "hello", nil
 }
 
-func (m *mockDoc) Auth(ctx context.Context, name string, r *http.Request) error {
+func (m *mockDoc) Auth(ctx context.Context, name string, r *http.Request) (string, error) {
 	if m.auth != nil {
 		return m.auth(ctx, name, r)
 	}
-	return nil
+	return "", nil
 }
 
 func (m *mockDoc) Save(ctx context.Context, name, content string) error {
@@ -239,10 +241,10 @@ func newServerConn(t *testing.T) (server *websocket.Conn) {
 	return serverConn
 }
 
-func newTestConn(t *testing.T, r *room) *conn {
+func newTestConn(t *testing.T, r *room, userId string) *conn {
 	t.Helper()
 	var serverConn = newServerConn(t)
-	return newConn(serverConn, r, httptest.NewRequest("GET", "/test", nil))
+	return newConn(serverConn, r, httptest.NewRequest("GET", "/test", nil), userId)
 }
 
 func joinConn(t *testing.T, r *room, cn *conn) {
@@ -299,4 +301,15 @@ func readFrameFromConn(t *testing.T, cn *conn) (tag uint64, payload []byte) {
 		t.Fatal("no frame in conn out channel")
 		return 0, nil
 	}
+}
+
+func equalSlices[T cmp.Ordered](a []T, b []T) bool {
+	var ca []T
+	var cb []T
+	copy(ca, a)
+	copy(cb, b)
+	slices.Sort(ca)
+	slices.Sort(cb)
+	return slices.Equal(ca, cb)
+
 }

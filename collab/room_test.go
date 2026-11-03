@@ -51,7 +51,7 @@ func TestNewRoomCorruptSnapshotFallback(t *testing.T) {
 func TestRoomJoinAndLeave(t *testing.T) {
 	var c = newTestCollab(t, nil, nil)
 	var r = newTestRoom(t, c, "doc1", "hello", nil)
-	var cn = newTestConn(t, r)
+	var cn = newTestConn(t, r, "")
 	joinConn(t, r, cn)
 	r.mu.Lock()
 	var n = len(r.conns)
@@ -76,7 +76,7 @@ func TestRoomJoinAndLeave(t *testing.T) {
 func TestRoomJoinWhenClosedRejected(t *testing.T) {
 	var c = newTestCollab(t, nil, nil)
 	var r = newTestRoom(t, c, "doc1", "hello", nil)
-	var cn = newTestConn(t, r)
+	var cn = newTestConn(t, r, "")
 	joinConn(t, r, cn)
 	r.leave(cn)
 	r.wgReaders.Done()
@@ -89,7 +89,7 @@ func TestRoomJoinWhenClosedRejected(t *testing.T) {
 func TestRoomLeaveRemovesAwareness(t *testing.T) {
 	var c = newTestCollab(t, nil, nil)
 	var r = newTestRoom(t, c, "doc1", "hello", nil)
-	var cn = newTestConn(t, r)
+	var cn = newTestConn(t, r, "")
 	joinConn(t, r, cn)
 	var aw = awareness.New(7)
 	aw.SetLocalState(map[string]any{"user": "alice"})
@@ -198,7 +198,7 @@ func TestRoomCloseSaveWorkerNoDeadlock(t *testing.T) {
 func TestRoomProcessFrameSyncStep1(t *testing.T) {
 	var c = newTestCollab(t, nil, nil)
 	var r = newTestRoom(t, c, "doc1", "hello", nil)
-	var cn = newTestConn(t, r)
+	var cn = newTestConn(t, r, "")
 	joinConn(t, r, cn)
 	defer r.wgReaders.Done()
 
@@ -222,7 +222,7 @@ func TestRoomProcessFrameSyncStep1(t *testing.T) {
 func TestRoomProcessFrameAwareness(t *testing.T) {
 	var c = newTestCollab(t, nil, nil)
 	var r = newTestRoom(t, c, "doc1", "hello", nil)
-	var cn = newTestConn(t, r)
+	var cn = newTestConn(t, r, "")
 	joinConn(t, r, cn)
 	defer r.wgReaders.Done()
 	var aw = awareness.New(9)
@@ -244,7 +244,7 @@ func TestRoomProcessFrameAwareness(t *testing.T) {
 func TestRoomProcessFrameQueryAwareness(t *testing.T) {
 	var c = newTestCollab(t, nil, nil)
 	var r = newTestRoom(t, c, "doc1", "hello", nil)
-	var cn = newTestConn(t, r)
+	var cn = newTestConn(t, r, "")
 	joinConn(t, r, cn)
 	defer r.wgReaders.Done()
 	if err := r.processFrame(frameQueryAwareness(), cn); err != nil {
@@ -259,7 +259,7 @@ func TestRoomProcessFrameQueryAwareness(t *testing.T) {
 func TestRoomProcessFrameUnknownTag(t *testing.T) {
 	var c = newTestCollab(t, nil, nil)
 	var r = newTestRoom(t, c, "doc1", "hello", nil)
-	var cn = newTestConn(t, r)
+	var cn = newTestConn(t, r, "")
 	joinConn(t, r, cn)
 	defer r.wgReaders.Done()
 	var enc = encoding.NewEncoder()
@@ -272,7 +272,7 @@ func TestRoomProcessFrameUnknownTag(t *testing.T) {
 func TestRoomProcessFrameMalformed(t *testing.T) {
 	var c = newTestCollab(t, nil, nil)
 	var r = newTestRoom(t, c, "doc1", "hello", nil)
-	var cn = newTestConn(t, r)
+	var cn = newTestConn(t, r, "")
 	joinConn(t, r, cn)
 	defer r.wgReaders.Done()
 	if err := r.processFrame([]byte{}, cn); err == nil {
@@ -340,8 +340,8 @@ func TestRoomOnUpdateTriggersSave(t *testing.T) {
 func TestRoomBroadcastSendsToConns(t *testing.T) {
 	var c = newTestCollab(t, nil, nil)
 	var r = newTestRoom(t, c, "doc1", "hello", nil)
-	var cn1 = newTestConn(t, r)
-	var cn2 = newTestConn(t, r)
+	var cn1 = newTestConn(t, r, "")
+	var cn2 = newTestConn(t, r, "")
 	joinConn(t, r, cn1)
 	joinConn(t, r, cn2)
 	defer func() { r.wgReaders.Done(); r.wgReaders.Done() }()
@@ -359,7 +359,7 @@ func TestRoomBroadcastSendsToConns(t *testing.T) {
 func TestConnSendSlowConsumer(t *testing.T) {
 	var c = newTestCollab(t, nil, nil)
 	var r = newTestRoom(t, c, "doc1", "hello", nil)
-	var cn = newTestConn(t, r)
+	var cn = newTestConn(t, r, "")
 	joinConn(t, r, cn)
 	defer r.wgReaders.Done()
 	for i := range frameQueueSize {

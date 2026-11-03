@@ -14,7 +14,7 @@ type StateStore interface {
 type DocumentService interface {
 	ExtractName(URL string) (string, bool)
 	Get(ctx context.Context, name string, r *http.Request) (string, error)
-	Auth(ctx context.Context, name string, r *http.Request) error
+	Auth(ctx context.Context, name string, r *http.Request) (string, error)
 	Save(ctx context.Context, name string, content string) error
 }
 

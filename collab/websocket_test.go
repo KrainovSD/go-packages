@@ -2,6 +2,7 @@ package collab
 
 import (
 	"context"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -148,5 +149,67 @@ func readClientUpdate(t *testing.T, conn *websocket.Conn, doc *crdt.Doc, want st
 	}
 	if got := doc.GetText(textName).ToString(); got != want {
 		t.Fatalf("client text = %q, want %q", got, want)
+	}
+}
+
+func TestCollabEndToEndGetRooms(t *testing.T) {
+	var doc = &mockDoc{auth: func(_ context.Context, _ string, r *http.Request) (string, error) {
+		return r.Header.Get("X-User-Id"), nil
+	}}
+	var c = newTestCollab(t, doc, nil)
+	var srv = httptest.NewServer(c.Handle())
+	t.Cleanup(srv.Close)
+	var wsURL = func(path string) string {
+		return "ws" + strings.TrimPrefix(srv.URL, "http") + path
+	}
+	var connAlice1 = newClientAs(t, wsURL("/room1"), "alice")
+	syncClient(t, connAlice1, 100, "hello")
+	var connBob = newClientAs(t, wsURL("/room1"), "bob")
+	syncClient(t, connBob, 101, "hello")
+	var connAlice2 = newClientAs(t, wsURL("/room2"), "alice")
+	syncClient(t, connAlice2, 102, "hello")
+
+	var got = c.GetRooms("alice")
+	if !equalSlices(got, []string{"room1", "room2"}) {
+		t.Fatalf("alice rooms = %v, want [room1 room2]", got)
+	}
+	if got = c.GetRooms("bob"); !equalSlices(got, []string{"room1"}) {
+		t.Fatalf("bob rooms = %v, want [room1]", got)
+	}
+	if got = c.GetRooms("carol"); len(got) != 0 {
+		t.Fatalf("carol rooms = %v, want none", got)
+	}
+}
+
+func newClientAs(t *testing.T, url, userId string) *websocket.Conn {
+	var conn, _, err = websocket.Dial(context.Background(), url, &websocket.DialOptions{
+		HTTPHeader: http.Header{"X-User-Id": []string{userId}},
+	})
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	t.Cleanup(func() { conn.Close(websocket.StatusNormalClosure, "") })
+	return conn
+}
+
+func TestCollabEndToEndGetContent(t *testing.T) {
+	var doc = &mockDoc{}
+	var store = newMockStore()
+	var c = newTestCollab(t, doc, store)
+	var srv = httptest.NewServer(c.Handle())
+	t.Cleanup(srv.Close)
+
+	var connA = newClient(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/room1")
+	var docA = syncClient(t, connA, 100, "hello")
+	var connB = newClient(t, "ws"+strings.TrimPrefix(srv.URL, "http")+"/room1")
+	var docB = syncClient(t, connB, 101, "hello")
+	sendClientUpdate(t, connA, docA, 5, " world")
+	readClientUpdate(t, connB, docB, "hello world")
+	waitForRoomText(t, c, "room1", "hello world")
+	if got := string(c.GetContent("room1")); got != "hello world" {
+		t.Fatalf("content = %q, want %q", got, "hello world")
+	}
+	if got := c.GetContent("nope"); got != nil {
+		t.Fatalf("expected nil for missing room, got %q", got)
 	}
 }
