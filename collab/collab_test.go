@@ -9,6 +9,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/reearth/ygo/crdt"
+	ysync "github.com/reearth/ygo/sync"
 )
 
 func TestCollabClose(t *testing.T) {
@@ -202,5 +205,114 @@ func TestCollabGetContent(t *testing.T) {
 	}
 	if got := c.GetContent("missing"); got != nil {
 		t.Fatalf("expected nil for missing room, got %q", got)
+	}
+}
+
+func TestCollabApplyPatch(t *testing.T) {
+	var c = newTestCollab(t, nil, nil)
+	var r = newTestRoom(t, c, "room1", "hello", nil)
+	c.rooms.set("room1", r)
+
+	var foreign = crdt.New(crdt.WithClientID(21))
+	if err := crdt.ApplyUpdateV1(foreign, r.doc.EncodeStateAsUpdate(), nil); err != nil {
+		t.Fatalf("sync foreign doc with room state: %v", err)
+	}
+	foreign.Transact(func(txn *crdt.Transaction) {
+		txn.GetText(textName).Insert(txn, 5, " world", nil)
+	}, nil)
+
+	var reply []byte
+	var err error
+	if reply, err = c.ApplyPatch("room1", frameSync(ysync.EncodeUpdate(foreign.EncodeStateAsUpdate()))); err != nil {
+		t.Fatalf("ApplyPatch: %v", err)
+	}
+	if len(reply) != 0 {
+		t.Fatalf("update patch must not produce a reply, got %d bytes", len(reply))
+	}
+	if got := r.text.ToString(); got != "hello world" {
+		t.Fatalf("room text = %q, want %q", got, "hello world")
+	}
+	if got := string(c.GetContent("room1")); got != "hello world" {
+		t.Fatalf("content = %q, want %q", got, "hello world")
+	}
+}
+
+func TestCollabApplyPatchBroadcastsToConns(t *testing.T) {
+	var c = newTestCollab(t, nil, nil)
+	var r = newTestRoom(t, c, "room1", "hello", nil)
+	c.rooms.set("room1", r)
+	var cn = newTestConn(t, r, "")
+	joinConn(t, r, cn)
+	defer r.wgReaders.Done()
+	var base = r.doc.EncodeStateAsUpdate()
+	var doc1 = crdt.New(crdt.WithClientID(22))
+	if err := crdt.ApplyUpdateV1(doc1, base, nil); err != nil {
+		t.Fatalf("sync doc1 doc with room state: %v", err)
+	}
+	doc1.Transact(func(txn *crdt.Transaction) {
+		txn.GetText(textName).Insert(txn, 5, " world", nil)
+	}, nil)
+	if _, err := c.ApplyPatch("room1", frameSync(ysync.EncodeUpdate(doc1.EncodeStateAsUpdate()))); err != nil {
+		t.Fatalf("ApplyPatch: %v", err)
+	}
+	var tag, payload = readFrameFromConn(t, cn)
+	if tag != messageSync {
+		t.Fatalf("expected broadcast sync frame, got tag %d", tag)
+	}
+	var doc2 = crdt.New(crdt.WithClientID(23))
+	if err := crdt.ApplyUpdateV1(doc2, base, nil); err != nil {
+		t.Fatalf("sync client with room base state: %v", err)
+	}
+
+	if _, err := ysync.ApplySyncMessage(doc2, payload, nil); err != nil {
+		t.Fatalf("apply broadcast: %v", err)
+	}
+	if got := doc2.GetText(textName).ToString(); got != "hello world" {
+		t.Fatalf("client text = %q, want %q", got, "hello world")
+	}
+}
+
+func TestCollabApplyPatchSyncStep1ReturnsState(t *testing.T) {
+	var c = newTestCollab(t, nil, nil)
+	var r = newTestRoom(t, c, "room1", "hello", nil)
+	c.rooms.set("room1", r)
+
+	var foreign = crdt.New(crdt.WithClientID(24))
+	var reply []byte
+	var err error
+	if reply, err = c.ApplyPatch("room1", frameSync(ysync.EncodeSyncStep1(foreign))); err != nil {
+		t.Fatalf("ApplyPatch: %v", err)
+	}
+	if len(reply) == 0 {
+		t.Fatal("sync step1 patch must return a step2 reply")
+	}
+	if _, err = ysync.ApplySyncMessage(foreign, reply, nil); err != nil {
+		t.Fatalf("apply reply: %v", err)
+	}
+	if got := foreign.GetText(textName).ToString(); got != "hello" {
+		t.Fatalf("foreign text = %q, want %q", got, "hello")
+	}
+}
+
+func TestCollabApplyPatchRoomMissing(t *testing.T) {
+	var c = newTestCollab(t, nil, nil)
+	var patch = frameSync(ysync.EncodeSyncStep1(crdt.New(crdt.WithClientID(25))))
+	if _, err := c.ApplyPatch("missing", patch); err == nil {
+		t.Fatal("expected error for a missing room")
+	}
+}
+
+func TestCollabApplyPatchRejectsNonSyncFrame(t *testing.T) {
+	var c = newTestCollab(t, nil, nil)
+	var r = newTestRoom(t, c, "room1", "hello", nil)
+	c.rooms.set("room1", r)
+	if _, err := c.ApplyPatch("room1", frameAwareness(nil)); err == nil {
+		t.Fatal("expected error for an awareness frame")
+	}
+	if _, err := c.ApplyPatch("room1", nil); err == nil {
+		t.Fatal("expected error for an empty patch")
+	}
+	if got := r.text.ToString(); got != "hello" {
+		t.Fatalf("room text must stay unchanged, got %q", got)
 	}
 }

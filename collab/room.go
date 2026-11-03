@@ -24,9 +24,9 @@ type room struct {
 	doc        *crdt.Doc
 	text       *crdt.YText
 	aw         *awareness.Awareness
+	conns      *conns
 	mu         sync.Mutex
-	conns      map[*conn]map[uint64]struct{}
-	closed     atomic.Bool
+	closed     bool
 	dirty      atomic.Bool
 	wgReaders  sync.WaitGroup
 }
@@ -52,34 +52,26 @@ func newRoom(c *Collab, name string, document string, snapshot []byte) *room {
 		doc:   doc,
 		text:  doc.GetText(textName),
 		aw:    awareness.New(uint64(doc.ClientID())),
-		conns: make(map[*conn]map[uint64]struct{}),
+		conns: newConns(),
 	}
 	r.saveWorker = newSerializedDebounceIntervalWorker(func() {
-		if r.closed.Load() || !r.dirty.Swap(false) {
+		r.mu.Lock()
+		if r.closed || !r.dirty.Swap(false) {
+			r.mu.Unlock()
 			return
 		}
+		r.mu.Unlock()
 		c.mutexes.lock(name)
 		defer c.mutexes.unlock(name)
 		c.store.Write(name, r.doc.EncodeStateAsUpdate())
 	}, 5*time.Second, c.settings.SaveInterval)
-	doc.OnUpdate(func(update []byte, _ any) {
+	doc.OnUpdate(func(update []byte, origin any) {
 		r.broadcast(syncFrame(ysync.EncodeUpdate(update)))
 		r.dirty.Store(true)
 		r.saveWorker.do()
 	})
 	r.aw.OnUpdate(func(evt awareness.UpdateEvent) {
-		if cn, ok := evt.Origin.(*conn); ok {
-			r.mu.Lock()
-			if ids, active := r.conns[cn]; active {
-				for _, id := range evt.Added {
-					ids[id] = struct{}{}
-				}
-				for _, id := range evt.Removed {
-					delete(ids, id)
-				}
-			}
-			r.mu.Unlock()
-		}
+		r.conns.awarenessUpdate(evt)
 		var changed = make([]uint64, 0, len(evt.Added)+len(evt.Updated)+len(evt.Removed))
 		changed = append(changed, evt.Added...)
 		changed = append(changed, evt.Updated...)
@@ -92,14 +84,66 @@ func newRoom(c *Collab, name string, document string, snapshot []byte) *room {
 	return r
 }
 
-func (r *room) broadcast(frame []byte) {
+func (r *room) join(cn *conn) (joined bool) {
 	r.mu.Lock()
-	var conns = make([]*conn, 0, len(r.conns))
-	for cn := range r.conns {
-		conns = append(conns, cn)
+	if r.closed {
+		r.mu.Unlock()
+		return false
 	}
+	r.wgReaders.Add(1)
+	r.conns.set(cn)
 	r.mu.Unlock()
-	for _, cn := range conns {
+	return true
+}
+
+func (r *room) leave(cn *conn) {
+	var ids, empty, ok = r.conns.delete(cn)
+	if !ok {
+		return
+	}
+	if r.c.cb.OnCloseConnection != nil {
+		r.c.cb.OnCloseConnection(r.name, cn.req)
+	}
+	r.removeAwareness(ids)
+	if empty {
+		r.close()
+	}
+}
+
+func (r *room) close() {
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		return
+	}
+	r.closed = true
+	r.mu.Unlock()
+	r.c.wgRoomClose.Go(func() {
+		r.saveWorker.close()
+		r.c.mutexes.lock(r.name)
+		defer r.c.mutexes.unlock(r.name)
+		r.c.rooms.delete(r.name, r)
+		var conns = r.conns.val()
+		helpers.AsyncWork(helpers.GetMaxThreads(), len(conns), func(i int) error {
+			conns[i].close(websocket.StatusGoingAway, "")
+			return nil
+		})
+		r.wgReaders.Wait()
+		if r.c.cb.OnCloseRoom != nil {
+			r.c.cb.OnCloseRoom(r.name)
+		}
+		r.aw.Destroy()
+		var err = r.c.doc.Save(context.Background(), r.name, r.text.ToString())
+		if err == nil {
+			r.c.store.Delete(r.name)
+			return
+		}
+		r.c.store.Write(r.name, r.doc.EncodeStateAsUpdate())
+	})
+}
+
+func (r *room) broadcast(frame []byte) {
+	for _, cn := range r.conns.val() {
 		cn.send(frame)
 	}
 }
@@ -114,7 +158,7 @@ func (r *room) processFrame(data []byte, cn *conn) error {
 	switch tag {
 	case messageSync:
 		var payload = dec.RemainingBytes()
-		var reply, err = ysync.ApplySyncMessage(r.doc, payload, cn)
+		var reply, err = r.applyPatch(payload, cn)
 		if err != nil {
 			r.c.log.Warn("collab: apply sync", "error", err)
 		}
@@ -138,67 +182,18 @@ func (r *room) processFrame(data []byte, cn *conn) error {
 	return nil
 }
 
-func (r *room) join(cn *conn) (joined bool) {
+func (r *room) applyPatch(patch []byte, origin any) ([]byte, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.closed.Load() {
-		return false
+	if r.closed {
+		return nil, fmt.Errorf("collab: room %s is closed", r.name)
 	}
-	r.wgReaders.Add(1)
-	r.conns[cn] = make(map[uint64]struct{})
-	return true
-}
-
-func (r *room) leave(cn *conn) {
-	r.mu.Lock()
-	var ids, ok = r.conns[cn]
-	delete(r.conns, cn)
-	var empty = len(r.conns) == 0
-	r.mu.Unlock()
-	if !ok {
-		return
+	var reply []byte
+	var err error
+	if reply, err = ysync.ApplySyncMessage(r.doc, patch, origin); err != nil {
+		return nil, fmt.Errorf("collab: apply sync message: %w", err)
 	}
-	if r.c.cb.OnCloseConnection != nil {
-		r.c.cb.OnCloseConnection(r.name, cn.req)
-	}
-	r.removeAwareness(ids)
-	if empty {
-		r.close()
-	}
-}
-
-func (r *room) close() {
-	if !r.closed.CompareAndSwap(false, true) {
-		return
-	}
-	r.c.wgRoomClose.Go(func() {
-		r.saveWorker.close()
-		r.c.mutexes.lock(r.name)
-		defer r.c.mutexes.unlock(r.name)
-		r.mu.Lock()
-		var conns = make([]*conn, 0, len(r.conns))
-		for cn := range r.conns {
-			conns = append(conns, cn)
-		}
-		r.mu.Unlock()
-		helpers.AsyncWork(helpers.GetMaxThreads(), len(conns), func(i int) error {
-			conns[i].close(websocket.StatusGoingAway, "")
-			return nil
-		})
-		r.wgReaders.Wait()
-		if r.c.cb.OnCloseRoom != nil {
-			r.c.cb.OnCloseRoom(r.name)
-		}
-		r.c.rooms.delete(r.name, r)
-		r.aw.Destroy()
-		var content = r.text.ToString()
-		var err = r.c.doc.Save(context.Background(), r.name, content)
-		if err == nil {
-			r.c.store.Delete(r.name)
-			return
-		}
-		r.c.store.Write(r.name, r.doc.EncodeStateAsUpdate())
-	})
+	return reply, nil
 }
 
 func (r *room) removeAwareness(ids map[uint64]struct{}) {
@@ -243,4 +238,54 @@ func awarenessFrame(update []byte) []byte {
 	enc.WriteVarUint(messageAwareness)
 	enc.WriteVarBytes(update)
 	return enc.Bytes()
+}
+
+type conns struct {
+	mu  sync.RWMutex
+	raw map[*conn]map[uint64]struct{}
+}
+
+func newConns() *conns {
+	var r = &conns{raw: make(map[*conn]map[uint64]struct{}, 64)}
+	return r
+}
+
+func (c *conns) awarenessUpdate(evt awareness.UpdateEvent) {
+	if cn, ok := evt.Origin.(*conn); ok {
+		c.mu.Lock()
+		if ids, active := c.raw[cn]; active {
+			for _, id := range evt.Added {
+				ids[id] = struct{}{}
+			}
+			for _, id := range evt.Removed {
+				delete(ids, id)
+			}
+		}
+		c.mu.Unlock()
+	}
+}
+
+func (c *conns) val() []*conn {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	var conns = make([]*conn, 0, len(c.raw))
+	for cn := range c.raw {
+		conns = append(conns, cn)
+	}
+	return conns
+}
+
+func (c *conns) set(cn *conn) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.raw[cn] = make(map[uint64]struct{})
+}
+
+func (c *conns) delete(cn *conn) (ids map[uint64]struct{}, empty bool, ok bool) {
+	c.mu.Lock()
+	ids, ok = c.raw[cn]
+	delete(c.raw, cn)
+	empty = len(c.raw) == 0
+	c.mu.Unlock()
+	return ids, empty, ok
 }

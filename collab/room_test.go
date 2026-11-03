@@ -53,20 +53,15 @@ func TestRoomJoinAndLeave(t *testing.T) {
 	var r = newTestRoom(t, c, "doc1", "hello", nil)
 	var cn = newTestConn(t, r, "")
 	joinConn(t, r, cn)
-	r.mu.Lock()
-	var n = len(r.conns)
-	r.mu.Unlock()
+	var n = len(r.conns.val())
 	if n != 1 {
 		t.Fatalf("expected 1 conn, got %d", n)
 	}
 	r.leave(cn)
-	r.mu.Lock()
-	n = len(r.conns)
-	r.mu.Unlock()
-	if n != 0 {
+	if n = len(r.conns.val()); n != 0 {
 		t.Fatalf("expected 0 conns after leave, got %d", n)
 	}
-	if !r.closed.Load() {
+	if !roomClosed(r) {
 		t.Fatal("room must close after the last conn leaves")
 	}
 	r.wgReaders.Done()
@@ -96,10 +91,7 @@ func TestRoomLeaveRemovesAwareness(t *testing.T) {
 	if err := r.processFrame(frameAwareness(aw.EncodeUpdate(nil)), cn); err != nil {
 		t.Fatalf("processFrame: %v", err)
 	}
-	r.mu.Lock()
-	var tracked = len(r.conns[cn])
-	r.mu.Unlock()
-	if tracked != 1 {
+	if tracked := connAwarenessCount(r, cn); tracked != 1 {
 		t.Fatalf("expected 1 tracked awareness id, got %d", tracked)
 	}
 	if _, ok := r.aw.Meta(7); !ok {
@@ -161,6 +153,20 @@ func TestRoomCloseWritesStoreOnSaveError(t *testing.T) {
 	}
 }
 
+func TestRoomApplyPatchAfterClose(t *testing.T) {
+	var c = newTestCollab(t, nil, nil)
+	var r = newTestRoom(t, c, "doc1", "hello", nil)
+	r.close()
+	waitForRoomClose(t, c)
+	var foreign = crdt.New(crdt.WithClientID(21))
+	foreign.Transact(func(txn *crdt.Transaction) {
+		txn.GetText(textName).Insert(txn, 0, "patch", nil)
+	}, nil)
+	if _, err := r.applyPatch(ysync.EncodeUpdate(foreign.EncodeStateAsUpdate()), nil); err == nil {
+		t.Fatal("applyPatch must fail after room close")
+	}
+}
+
 func TestRoomCloseSaveWorkerNoDeadlock(t *testing.T) {
 	var c = newTestCollab(t, nil, nil)
 	var r = newRoom(c, "doc1", "hello", nil)
@@ -169,7 +175,7 @@ func TestRoomCloseSaveWorkerNoDeadlock(t *testing.T) {
 	var passed = make(chan struct{})
 	var proceed = make(chan struct{})
 	r.saveWorker = newSerializedDebounceIntervalWorker(func() {
-		if r.closed.Load() {
+		if roomClosed(r) {
 			return
 		}
 		close(passed)
@@ -233,10 +239,7 @@ func TestRoomProcessFrameAwareness(t *testing.T) {
 	if _, ok := r.aw.Meta(9); !ok {
 		t.Fatal("expected awareness meta for client 9")
 	}
-	r.mu.Lock()
-	var tracked = len(r.conns[cn])
-	r.mu.Unlock()
-	if tracked != 1 {
+	if tracked := connAwarenessCount(r, cn); tracked != 1 {
 		t.Fatalf("expected 1 tracked awareness id, got %d", tracked)
 	}
 }

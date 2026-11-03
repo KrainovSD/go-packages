@@ -143,7 +143,7 @@ func newTestRoom(t *testing.T, c *Collab, name, document string, snapshot []byte
 	var r = newRoom(c, name, document, snapshot)
 	r.saveWorker.close()
 	r.saveWorker = newSerializedDebounceIntervalWorker(func() {
-		if r.closed.Load() {
+		if roomClosed(r) {
 			return
 		}
 		c.mutexes.lock(name)
@@ -155,6 +155,18 @@ func newTestRoom(t *testing.T, c *Collab, name, document string, snapshot []byte
 		r.aw.Destroy()
 	})
 	return r
+}
+
+func roomClosed(r *room) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.closed
+}
+
+func connAwarenessCount(r *room, cn *conn) int {
+	r.conns.mu.RLock()
+	defer r.conns.mu.RUnlock()
+	return len(r.conns.raw[cn])
 }
 
 func waitForRoomClose(t *testing.T, c *Collab) {
@@ -304,12 +316,9 @@ func readFrameFromConn(t *testing.T, cn *conn) (tag uint64, payload []byte) {
 }
 
 func equalSlices[T cmp.Ordered](a []T, b []T) bool {
-	var ca []T
-	var cb []T
-	copy(ca, a)
-	copy(cb, b)
+	var ca = append([]T(nil), a...)
+	var cb = append([]T(nil), b...)
 	slices.Sort(ca)
 	slices.Sort(cb)
 	return slices.Equal(ca, cb)
-
 }

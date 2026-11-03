@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/KrainovSD/go-packages/helpers"
+	"github.com/reearth/ygo/encoding"
 )
 
 type Callbacks struct {
@@ -125,14 +126,12 @@ func (c *Collab) Close(ctx context.Context) {
 func (c *Collab) GetRooms(userId string) []string {
 	var found []string
 	for _, rm := range c.rooms.val() {
-		rm.mu.Lock()
-		for cn := range rm.conns {
+		for _, cn := range rm.conns.val() {
 			if cn.userId == userId {
 				found = append(found, rm.name)
 				break
 			}
 		}
-		rm.mu.Unlock()
 	}
 	return found
 }
@@ -143,6 +142,23 @@ func (c *Collab) GetContent(roomId string) []byte {
 		return nil
 	}
 	return []byte(rm.text.ToString())
+}
+
+func (c *Collab) ApplyPatch(roomId string, patch []byte) ([]byte, error) {
+	var rm = c.rooms.get(roomId)
+	if rm == nil {
+		return nil, fmt.Errorf("collab: room %s does not exist or has been closed", roomId)
+	}
+	var dec = encoding.NewDecoder(patch)
+	var tag uint64
+	var err error
+	if tag, err = dec.ReadVarUint(); err != nil {
+		return nil, fmt.Errorf("collab: read patch message tag: %w", err)
+	}
+	if tag != messageSync {
+		return nil, fmt.Errorf("collab: patch is not a sync frame")
+	}
+	return rm.applyPatch(dec.RemainingBytes(), nil)
 }
 
 type rooms struct {
