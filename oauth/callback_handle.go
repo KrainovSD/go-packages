@@ -88,7 +88,7 @@ func (o *Oauth) CallbackHandle() func(w http.ResponseWriter, r *http.Request) {
 		}
 		var sessionToken SessionToken
 		if o.handlers.CreateSession != nil {
-			if sessionToken, err = o.handlers.CreateSession(r.Context(), tokenInfo, user, verifiedIdToken); err != nil {
+			if sessionToken, err = o.handlers.CreateSession(r.Context(), &tokenInfo, &user, verifiedIdToken); err != nil {
 				redirectWithError(fmt.Errorf("create session: %w", err))
 				return
 			}
@@ -107,7 +107,7 @@ func (o *Oauth) CallbackHandle() func(w http.ResponseWriter, r *http.Request) {
 					Secure:   proto == "https",
 				})
 			} else {
-				o.log.Warn("not found refresh token or expires in", "refreshToken", tokenInfo.RefreshToken == "", "expiresIn", tokenInfo.RefreshTokenExpiresIn == 0)
+				o.log.Warn("not found refresh token or expires in", "refreshToken", tokenInfo.RefreshToken != "", "expiresIn", tokenInfo.RefreshTokenExpiresIn != 0)
 			}
 		}
 		if o.cookieSessionToken != nil {

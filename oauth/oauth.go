@@ -117,7 +117,7 @@ type OauthHandlers struct {
 	UpdateToken   func(ctx context.Context, token string) (SessionToken, error)
 	EndSession    func(ctx context.Context, token string, URL string) error
 	ParseUser     func(ctx context.Context, response []byte) (User, error)
-	CreateSession func(ctx context.Context, token TokenInfo, user User, verifiedIdToken *oidc.IDToken) (SessionToken, error)
+	CreateSession func(ctx context.Context, token *TokenInfo, user *User, verifiedIdToken *oidc.IDToken) (SessionToken, error)
 }
 
 type OauthCookie struct {
