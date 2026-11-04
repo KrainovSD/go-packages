@@ -152,7 +152,7 @@ func readClientUpdate(t *testing.T, conn *websocket.Conn, doc *crdt.Doc, want st
 	}
 }
 
-func TestCollabEndToEndGetRooms(t *testing.T) {
+func TestCollabEndToEndGetRoomsByUserId(t *testing.T) {
 	var doc = &mockDoc{auth: func(_ context.Context, _ string, r *http.Request) (string, error) {
 		return r.Header.Get("X-User-Id"), nil
 	}}
@@ -169,15 +169,24 @@ func TestCollabEndToEndGetRooms(t *testing.T) {
 	var connAlice2 = newClientAs(t, wsURL("/room2"), "alice")
 	syncClient(t, connAlice2, 102, "hello")
 
-	var got = c.GetRooms("alice")
+	var got = c.GetRoomsByUserId("alice")
 	if !equalSlices(got, []string{"room1", "room2"}) {
 		t.Fatalf("alice rooms = %v, want [room1 room2]", got)
 	}
-	if got = c.GetRooms("bob"); !equalSlices(got, []string{"room1"}) {
+	if got = c.GetRoomsByUserId("bob"); !equalSlices(got, []string{"room1"}) {
 		t.Fatalf("bob rooms = %v, want [room1]", got)
 	}
-	if got = c.GetRooms("carol"); len(got) != 0 {
+	if got = c.GetRoomsByUserId("carol"); len(got) != 0 {
 		t.Fatalf("carol rooms = %v, want none", got)
+	}
+	if got = c.GetRooms(); !equalSlices(got, []string{"room1", "room2"}) {
+		t.Fatalf("all rooms = %v, want [room1 room2]", got)
+	}
+	if !c.HasRoom("room1") || !c.HasRoom("room2") {
+		t.Fatal("expected HasRoom to report both live rooms")
+	}
+	if c.HasRoom("room3") {
+		t.Fatal("expected HasRoom to be false for a room without conns")
 	}
 }
 

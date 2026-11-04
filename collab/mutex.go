@@ -31,11 +31,17 @@ func (s *mutexStore) lock(name string) {
 }
 
 func (s *mutexStore) unlock(name string) {
+	if !s.tryUnlock(name) {
+		panic("collab: mutex not exists for key " + name)
+	}
+}
+
+func (s *mutexStore) tryUnlock(name string) bool {
 	s.mu.Lock()
 	var source, ok = s.sources[name]
 	if !ok {
 		s.mu.Unlock()
-		panic("collab: mutex not exists for key " + name)
+		return false
 	}
 	source.owners--
 	if source.owners == 0 && s.sources[name] == source {
@@ -43,4 +49,5 @@ func (s *mutexStore) unlock(name string) {
 	}
 	s.mu.Unlock()
 	source.mu.Unlock()
+	return true
 }

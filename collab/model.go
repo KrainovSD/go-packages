@@ -9,6 +9,7 @@ type StateStore interface {
 	Read(name string) []byte
 	Write(name string, content []byte)
 	Delete(name string)
+	Files() ([]string, error)
 }
 
 type DocumentService interface {

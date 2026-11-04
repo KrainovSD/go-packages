@@ -66,6 +66,9 @@ func newRoom(c *Collab, name string, document string, snapshot []byte) *room {
 		c.store.Write(name, r.doc.EncodeStateAsUpdate())
 	}, 5*time.Second, c.settings.SaveInterval)
 	doc.OnUpdate(func(update []byte, origin any) {
+		if emptyUpdate(update) {
+			return
+		}
 		r.broadcast(syncFrame(ysync.EncodeUpdate(update)))
 		r.dirty.Store(true)
 		r.saveWorker.do()
@@ -231,6 +234,26 @@ func syncFrame(msg []byte) []byte {
 	enc.WriteVarUint(messageSync)
 	enc.WriteRaw(msg)
 	return enc.Bytes()
+}
+
+func emptyUpdate(update []byte) bool {
+	if len(update) == 0 {
+		return true
+	}
+	var dec = encoding.NewDecoder(update)
+	var structs uint64
+	var err error
+	if structs, err = dec.ReadVarUint(); err != nil {
+		return false
+	}
+	if structs != 0 {
+		return false
+	}
+	var deletes uint64
+	if deletes, err = dec.ReadVarUint(); err != nil {
+		return false
+	}
+	return deletes == 0
 }
 
 func awarenessFrame(update []byte) []byte {

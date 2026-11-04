@@ -80,6 +80,47 @@ func TestNewFSStoreValidation(t *testing.T) {
 	}
 }
 
+func TestFSStoreFiles(t *testing.T) {
+	var store, err = NewFSStore(fsStoreDir(t), false, testLogger(t))
+	if err != nil {
+		t.Fatalf("NewFSStore: %v", err)
+	}
+	store.Write("doc1", []byte("one"))
+	store.Write("nested/doc2", []byte("two"))
+	var leftovers = []string{".tmp-123", "doc1.bin.tmp", "notes.txt"}
+	for _, name := range leftovers {
+		if err = os.WriteFile(filepath.Join(store.path, name), []byte("junk"), 0o644); err != nil {
+			t.Fatalf("write leftover %s: %v", name, err)
+		}
+	}
+	var files []string
+	if files, err = store.Files(); err != nil {
+		t.Fatalf("Files: %v", err)
+	}
+	if !equalSlices(files, []string{"doc1", "nested/doc2"}) {
+		t.Fatalf("files = %v, want store keys without temp leftovers", files)
+	}
+	for _, name := range files {
+		if store.Read(name) == nil {
+			t.Fatalf("file %q returned by Files must be readable by name", name)
+		}
+	}
+}
+
+func TestFSStoreFilesEmpty(t *testing.T) {
+	var store, err = NewFSStore(fsStoreDir(t), false, testLogger(t))
+	if err != nil {
+		t.Fatalf("NewFSStore: %v", err)
+	}
+	var files []string
+	if files, err = store.Files(); err != nil {
+		t.Fatalf("Files: %v", err)
+	}
+	if len(files) != 0 {
+		t.Fatalf("expected no files in an empty store, got %v", files)
+	}
+}
+
 func fsStoreDir(t *testing.T) string {
 	t.Helper()
 	var dir = filepath.Join(".", fmt.Sprintf(".fsstore-test-%d", time.Now().UnixNano()))

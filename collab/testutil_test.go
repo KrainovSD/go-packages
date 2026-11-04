@@ -97,6 +97,16 @@ func (s *mockStore) Delete(name string) {
 	delete(s.data, name)
 }
 
+func (s *mockStore) Files() ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var files = make([]string, 0, len(s.data))
+	for name := range s.data {
+		files = append(files, name)
+	}
+	return files, nil
+}
+
 func (s *mockStore) snapshot(t *testing.T, name string) []byte {
 	t.Helper()
 	s.mu.Lock()

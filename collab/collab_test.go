@@ -143,7 +143,7 @@ func TestRoomsDeleteWrongInstanceIsNoop(t *testing.T) {
 	}
 }
 
-func TestCollabGetRooms(t *testing.T) {
+func TestCollabGetRoomsByUserId(t *testing.T) {
 	var c = newTestCollab(t, nil, nil)
 	var room1 = newTestRoom(t, c, "room1", "hello", nil)
 	var room2 = newTestRoom(t, c, "room2", "hello", nil)
@@ -159,12 +159,12 @@ func TestCollabGetRooms(t *testing.T) {
 	joinConn(t, room2, alice3)
 	joinConn(t, room2, bob)
 
-	var got = c.GetRooms("alice")
+	var got = c.GetRoomsByUserId("alice")
 
 	if !equalSlices(got, []string{"room1", "room2"}) {
 		t.Fatalf("alice rooms = %v, want [room1 room2]", got)
 	}
-	if got = c.GetRooms("bob"); !equalSlices(got, []string{"room2"}) {
+	if got = c.GetRoomsByUserId("bob"); !equalSlices(got, []string{"room2"}) {
 		t.Fatalf("bob rooms = %v, want [room2]", got)
 	}
 
@@ -179,21 +179,107 @@ func TestCollabGetRooms(t *testing.T) {
 	waitForRoomClose(t, c)
 }
 
-func TestCollabGetRoomsEmpty(t *testing.T) {
+func TestCollabGetRoomsByUserIdEmpty(t *testing.T) {
 	var c = newTestCollab(t, nil, nil)
-	if got := c.GetRooms("alice"); len(got) != 0 {
+	if got := c.GetRoomsByUserId("alice"); len(got) != 0 {
 		t.Fatalf("expected no rooms on fresh collab, got %v", got)
 	}
 	var r = newTestRoom(t, c, "room1", "hello", nil)
 	c.rooms.set("room1", r)
 	var cn = newTestConn(t, r, "bob")
 	joinConn(t, r, cn)
-	if got := c.GetRooms("alice"); len(got) != 0 {
+	if got := c.GetRoomsByUserId("alice"); len(got) != 0 {
 		t.Fatalf("expected no rooms for alice, got %v", got)
 	}
 	r.leave(cn)
 	r.wgReaders.Done()
 	waitForRoomClose(t, c)
+}
+
+func TestCollabGetRoomsAll(t *testing.T) {
+	var c = newTestCollab(t, nil, nil)
+	c.rooms.set("room1", newTestRoom(t, c, "room1", "hello", nil))
+	c.rooms.set("room2", newTestRoom(t, c, "room2", "hello", nil))
+	c.rooms.set("room3", newTestRoom(t, c, "room3", "hello", nil))
+	var got = c.GetRooms()
+	if !equalSlices(got, []string{"room1", "room2", "room3"}) {
+		t.Fatalf("rooms = %v, want all three rooms", got)
+	}
+}
+
+func TestCollabGetRoomsNoRooms(t *testing.T) {
+	var c = newTestCollab(t, nil, nil)
+	if got := c.GetRooms(); len(got) != 0 {
+		t.Fatalf("expected no rooms on fresh collab, got %v", got)
+	}
+}
+
+func TestCollabHasRoom(t *testing.T) {
+	var c = newTestCollab(t, nil, nil)
+	c.rooms.set("room1", newTestRoom(t, c, "room1", "hello", nil))
+	if !c.HasRoom("room1") {
+		t.Fatal("expected HasRoom to report room1")
+	}
+	if c.HasRoom("missing") {
+		t.Fatal("expected HasRoom to be false for a missing room")
+	}
+}
+
+func TestCollabLockUnlockRoom(t *testing.T) {
+	var c = newTestCollab(t, nil, nil)
+	if err := c.UnlockRoom("room1"); err == nil {
+		t.Fatal("expected error when unlocking a room that was never locked")
+	}
+	c.LockRoom("room1")
+	var err error
+	if err = c.UnlockRoom("room1"); err != nil {
+		t.Fatalf("unlock: %v", err)
+	}
+	if err = c.UnlockRoom("room1"); err == nil {
+		t.Fatal("expected error on a second unlock of the same room")
+	}
+}
+
+func TestCollabLockRoomSerializesCallers(t *testing.T) {
+	var c = newTestCollab(t, nil, nil)
+	c.LockRoom("room1")
+	var entered = make(chan struct{})
+	go func() {
+		c.LockRoom("room1")
+		close(entered)
+		c.UnlockRoom("room1")
+	}()
+	select {
+	case <-entered:
+		t.Fatal("second LockRoom must block while the room is locked")
+	case <-time.After(100 * time.Millisecond):
+	}
+	if err := c.UnlockRoom("room1"); err != nil {
+		t.Fatalf("unlock: %v", err)
+	}
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("second LockRoom did not acquire the room after unlock")
+	}
+}
+
+func TestCollabLockRoomBlocksRoomClose(t *testing.T) {
+	var c = newTestCollab(t, nil, nil)
+	var r = newTestRoom(t, c, "room1", "hello", nil)
+	c.rooms.set("room1", r)
+	c.LockRoom("room1")
+	r.close()
+	if c.rooms.get("room1") == nil {
+		t.Fatal("room must not be finalized while it is locked")
+	}
+	if err := c.UnlockRoom("room1"); err != nil {
+		t.Fatalf("unlock: %v", err)
+	}
+	waitForRoomClose(t, c)
+	if c.rooms.get("room1") != nil {
+		t.Fatal("room must be finalized after unlock")
+	}
 }
 
 func TestCollabGetContent(t *testing.T) {
@@ -272,25 +358,41 @@ func TestCollabApplyPatchBroadcastsToConns(t *testing.T) {
 	}
 }
 
-func TestCollabApplyPatchSyncStep1ReturnsState(t *testing.T) {
+func TestCollabApplyPatchRejectsSyncStep1(t *testing.T) {
 	var c = newTestCollab(t, nil, nil)
 	var r = newTestRoom(t, c, "room1", "hello", nil)
 	c.rooms.set("room1", r)
 
 	var foreign = crdt.New(crdt.WithClientID(24))
-	var reply []byte
-	var err error
-	if reply, err = c.ApplyPatch("room1", frameSync(ysync.EncodeSyncStep1(foreign))); err != nil {
-		t.Fatalf("ApplyPatch: %v", err)
+	if _, err := c.ApplyPatch("room1", frameSync(ysync.EncodeSyncStep1(foreign))); err == nil {
+		t.Fatal("expected error for a sync step1 patch")
 	}
-	if len(reply) == 0 {
-		t.Fatal("sync step1 patch must return a step2 reply")
+	if got := r.text.ToString(); got != "hello" {
+		t.Fatalf("room text must stay unchanged, got %q", got)
 	}
-	if _, err = ysync.ApplySyncMessage(foreign, reply, nil); err != nil {
-		t.Fatalf("apply reply: %v", err)
+}
+
+func TestCollabApplyPatchRejectsSyncStep2(t *testing.T) {
+	var c = newTestCollab(t, nil, nil)
+	var r = newTestRoom(t, c, "room1", "hello", nil)
+	c.rooms.set("room1", r)
+
+	var foreign = crdt.New(crdt.WithClientID(25))
+	if err := crdt.ApplyUpdateV1(foreign, r.doc.EncodeStateAsUpdate(), nil); err != nil {
+		t.Fatalf("sync foreign doc with room state: %v", err)
 	}
-	if got := foreign.GetText(textName).ToString(); got != "hello" {
-		t.Fatalf("foreign text = %q, want %q", got, "hello")
+	foreign.Transact(func(txn *crdt.Transaction) {
+		txn.GetText(textName).Insert(txn, 5, " world", nil)
+	}, nil)
+	var step2, err = ysync.EncodeSyncStep2(foreign, ysync.EncodeSyncStep1(crdt.New(crdt.WithClientID(26))))
+	if err != nil {
+		t.Fatalf("encode step2: %v", err)
+	}
+	if _, err = c.ApplyPatch("room1", frameSync(step2)); err == nil {
+		t.Fatalf("expected error for a sync step2 patch")
+	}
+	if got := r.text.ToString(); got != "hello" {
+		t.Fatalf("room text = %q, want %q", got, "hello")
 	}
 }
 
@@ -314,5 +416,99 @@ func TestCollabApplyPatchRejectsNonSyncFrame(t *testing.T) {
 	}
 	if got := r.text.ToString(); got != "hello" {
 		t.Fatalf("room text must stay unchanged, got %q", got)
+	}
+}
+
+func TestCollabSyncDoc(t *testing.T) {
+	var c = newTestCollab(t, nil, nil)
+	var r = newTestRoom(t, c, "room1", "hello", nil)
+	c.rooms.set("room1", r)
+	var doc = crdt.New(crdt.WithClientID(27))
+	var err error
+	if err = c.SyncDoc("room1", doc); err != nil {
+		t.Fatalf("sync doc: %v", err)
+	}
+	if got := doc.GetText(textName).ToString(); got != "hello" {
+		t.Fatalf("doc text = %q, want %q", got, "hello")
+	}
+	doc.Transact(func(txn *crdt.Transaction) {
+		txn.GetText(textName).Insert(txn, 5, " world", nil)
+	}, nil)
+	if err = c.SyncDoc("room1", doc); err != nil {
+		t.Fatalf("sync doc twice: %v", err)
+	}
+	if got := doc.GetText(textName).ToString(); got != "hello world" {
+		t.Fatalf("doc text = %q, want %q", got, "hello world")
+	}
+	if got := r.text.ToString(); got != "hello world" {
+		t.Fatalf("room text = %q, want %q", got, "hello world")
+	}
+}
+
+func TestCollabSyncDocRoomMissing(t *testing.T) {
+	var c = newTestCollab(t, nil, nil)
+	if err := c.SyncDoc("missing", crdt.New(crdt.WithClientID(28))); err == nil {
+		t.Fatal("expected error for a missing room")
+	}
+}
+
+func TestCollabSyncDocNilDoc(t *testing.T) {
+	var c = newTestCollab(t, nil, nil)
+	var r = newTestRoom(t, c, "room1", "hello", nil)
+	c.rooms.set("room1", r)
+	if err := c.SyncDoc("room1", nil); err == nil {
+		t.Fatal("expected error for a nil doc")
+	}
+}
+
+func TestCollabSyncDocNoopKeepsRoomClean(t *testing.T) {
+	var c = newTestCollab(t, nil, nil)
+	var r = newTestRoom(t, c, "room1", "hello", nil)
+	c.rooms.set("room1", r)
+	r.dirty.Store(false)
+	var doc = crdt.New(crdt.WithClientID(31))
+	if err := c.SyncDoc("room1", doc); err != nil {
+		t.Fatalf("sync doc: %v", err)
+	}
+	if r.dirty.Load() {
+		t.Fatal("no-op sync must not mark the room dirty")
+	}
+	if got := r.text.ToString(); got != "hello" {
+		t.Fatalf("room text must stay unchanged, got %q", got)
+	}
+}
+
+func TestCollabSyncDocBroadcastsToConns(t *testing.T) {
+	var c = newTestCollab(t, nil, nil)
+	var r = newTestRoom(t, c, "room1", "hello", nil)
+	c.rooms.set("room1", r)
+	var cn = newTestConn(t, r, "")
+	joinConn(t, r, cn)
+	defer r.wgReaders.Done()
+
+	var base = r.doc.EncodeStateAsUpdate()
+	var doc = crdt.New(crdt.WithClientID(29))
+	if err := c.SyncDoc("room1", doc); err != nil {
+		t.Fatalf("sync doc: %v", err)
+	}
+	doc.Transact(func(txn *crdt.Transaction) {
+		txn.GetText(textName).Insert(txn, 5, " world", nil)
+	}, nil)
+	if err := c.SyncDoc("room1", doc); err != nil {
+		t.Fatalf("sync doc twice: %v", err)
+	}
+	var tag, payload = readFrameFromConn(t, cn)
+	if tag != messageSync {
+		t.Fatalf("expected broadcast sync frame, got tag %d", tag)
+	}
+	var client = crdt.New(crdt.WithClientID(30))
+	if err := crdt.ApplyUpdateV1(client, base, nil); err != nil {
+		t.Fatalf("sync client with room base state: %v", err)
+	}
+	if _, err := ysync.ApplySyncMessage(client, payload, nil); err != nil {
+		t.Fatalf("apply broadcast: %v", err)
+	}
+	if got := client.GetText(textName).ToString(); got != "hello world" {
+		t.Fatalf("client text = %q, want %q", got, "hello world")
 	}
 }

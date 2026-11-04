@@ -3,9 +3,11 @@ package collab
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 type FSStore struct {
@@ -33,6 +35,10 @@ func (s *FSStore) Write(name string, content []byte) {
 		return
 	}
 	var filename = filepath.Join(s.path, name+".bin")
+	if err := os.MkdirAll(filepath.Dir(filename), 0o755); err != nil {
+		s.log.Error("write state: create dir", "error", err, "name", name)
+		return
+	}
 	if s.fsync {
 		var tmp *os.File
 		var err error
@@ -112,4 +118,26 @@ func (s *FSStore) Delete(name string) {
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		s.log.Error("delete state", "error", err, "name", name)
 	}
+}
+
+func (s *FSStore) Files() ([]string, error) {
+	var result = make([]string, 0)
+	var err error
+	if err = filepath.WalkDir(s.path, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".bin") {
+			return nil
+		}
+		var name string
+		if name, err = filepath.Rel(s.path, path); err != nil {
+			return err
+		}
+		result = append(result, strings.TrimSuffix(name, ".bin"))
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("read states: %w", err)
+	}
+	return result, nil
 }

@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"github.com/KrainovSD/go-packages/helpers"
+	"github.com/reearth/ygo/crdt"
 	"github.com/reearth/ygo/encoding"
+	ysync "github.com/reearth/ygo/sync"
 )
 
 type Callbacks struct {
@@ -123,7 +125,7 @@ func (c *Collab) Close(ctx context.Context) {
 	})
 }
 
-func (c *Collab) GetRooms(userId string) []string {
+func (c *Collab) GetRoomsByUserId(userId string) []string {
 	var found []string
 	for _, rm := range c.rooms.val() {
 		for _, cn := range rm.conns.val() {
@@ -136,12 +138,51 @@ func (c *Collab) GetRooms(userId string) []string {
 	return found
 }
 
+func (c *Collab) GetRooms() []string {
+	var found []string
+	for _, rm := range c.rooms.val() {
+		found = append(found, rm.name)
+	}
+	return found
+}
+
+func (c *Collab) HasRoom(roomId string) bool {
+	return c.rooms.get(roomId) != nil
+}
+
 func (c *Collab) GetContent(roomId string) []byte {
 	var rm = c.rooms.get(roomId)
 	if rm == nil {
 		return nil
 	}
 	return []byte(rm.text.ToString())
+}
+
+func (c *Collab) SyncDoc(roomId string, doc *crdt.Doc) error {
+	if doc == nil {
+		return fmt.Errorf("collab: doc must be passed")
+	}
+	var rm = c.rooms.get(roomId)
+	if rm == nil {
+		return fmt.Errorf("collab: room %s does not exist or has been closed", roomId)
+	}
+	var clientStep1 = ysync.EncodeSyncStep1(doc)
+	var serverStep2, err = ysync.EncodeSyncStep2(rm.doc, clientStep1)
+	if err != nil {
+		return fmt.Errorf("collab: room %s encode server step2: %w", roomId, err)
+	}
+	if _, err = ysync.ApplySyncMessage(doc, serverStep2, nil); err != nil {
+		return fmt.Errorf("collab: room %s apply server step2: %w", roomId, err)
+	}
+	var serverStep1 = ysync.EncodeSyncStep1(rm.doc)
+	var clientStep2 []byte
+	if clientStep2, err = ysync.EncodeSyncStep2(doc, serverStep1); err != nil {
+		return fmt.Errorf("collab: room %s encode client step2: %w", roomId, err)
+	}
+	if _, err = rm.applyPatch(clientStep2, nil); err != nil {
+		return fmt.Errorf("collab: room %s apply client step2: %w", roomId, err)
+	}
+	return nil
 }
 
 func (c *Collab) ApplyPatch(roomId string, patch []byte) ([]byte, error) {
@@ -158,7 +199,27 @@ func (c *Collab) ApplyPatch(roomId string, patch []byte) ([]byte, error) {
 	if tag != messageSync {
 		return nil, fmt.Errorf("collab: patch is not a sync frame")
 	}
-	return rm.applyPatch(dec.RemainingBytes(), nil)
+	var payload = dec.RemainingBytes()
+	var decInner = encoding.NewDecoder(payload)
+	var tagInner uint64
+	if tagInner, err = decInner.ReadVarUint(); err != nil {
+		return nil, fmt.Errorf("collab: read patch sync message type: %w", err)
+	}
+	if tagInner == uint64(ysync.MsgSyncStep1) || tagInner == uint64(ysync.MsgSyncStep2) {
+		return nil, fmt.Errorf("collab: patch must be an update message, not sync step1 or step2")
+	}
+	return rm.applyPatch(payload, nil)
+}
+
+func (c *Collab) LockRoom(roomId string) {
+	c.mutexes.lock(roomId)
+}
+
+func (c *Collab) UnlockRoom(roomId string) error {
+	if !c.mutexes.tryUnlock(roomId) {
+		return fmt.Errorf("collab: mutex not exists for room %s", roomId)
+	}
+	return nil
 }
 
 type rooms struct {
