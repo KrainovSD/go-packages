@@ -51,7 +51,7 @@ func (o *Oauth) TokenHandle() func(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			if o.handlers.CreateSession != nil {
-				if sessionToken, err = o.handlers.CreateSession(r.Context(), tokenInfo, user, verifiedIdToken); err != nil {
+				if sessionToken, err = o.handlers.CreateSession(r.Context(), &tokenInfo, &user, verifiedIdToken); err != nil {
 					o.sendError(w, r, fmt.Errorf("create session: %w", err), 401)
 					return
 				}

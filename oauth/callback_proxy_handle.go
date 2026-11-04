@@ -67,7 +67,7 @@ func (o *Oauth) CallbackProxyHandle() func(w http.ResponseWriter, r *http.Reques
 		}
 		var sessionToken SessionToken
 		if o.handlers.CreateSession != nil {
-			if sessionToken, err = o.handlers.CreateSession(r.Context(), tokenInfo, user, verifiedIdToken); err != nil {
+			if sessionToken, err = o.handlers.CreateSession(r.Context(), &tokenInfo, &user, verifiedIdToken); err != nil {
 				o.sendError(w, r, fmt.Errorf("create session: %w", err), 0)
 				return
 			}
