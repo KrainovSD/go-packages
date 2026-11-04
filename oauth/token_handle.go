@@ -58,6 +58,18 @@ func (o *Oauth) TokenHandle() func(w http.ResponseWriter, r *http.Request) {
 			} else {
 				sessionToken = o.newSessionToken(tokenInfo, verifiedIdToken)
 			}
+			if tokenInfo.RefreshToken != "" && tokenInfo.RefreshTokenExpiresIn != 0 {
+				http.SetCookie(w, &http.Cookie{
+					Name:     o.cookieRefreshToken.Name,
+					Value:    tokenInfo.RefreshToken,
+					Path:     o.cookieRefreshToken.Prefix,
+					MaxAge:   tokenInfo.RefreshTokenExpiresIn,
+					HttpOnly: true,
+					Secure:   frontendProto == "https",
+				})
+			} else {
+				o.log.Warn("not found refresh token or expires in", "refreshToken", tokenInfo.RefreshToken != "", "expiresIn", tokenInfo.RefreshTokenExpiresIn != 0)
+			}
 		} else {
 			sessionToken = SessionToken{
 				Token:   token,
@@ -76,6 +88,5 @@ func (o *Oauth) TokenHandle() func(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(sessionToken)
-		return
 	}
 }
