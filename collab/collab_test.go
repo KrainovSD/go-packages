@@ -196,6 +196,82 @@ func TestCollabGetRoomsByUserIdEmpty(t *testing.T) {
 	waitForRoomClose(t, c)
 }
 
+func TestCollabGetRoomUsers(t *testing.T) {
+	var c = newTestCollab(t, nil, nil)
+	var room1 = newTestRoom(t, c, "room1", "hello", nil)
+	var room2 = newTestRoom(t, c, "room2", "hello", nil)
+	c.rooms.set("room1", room1)
+	c.rooms.set("room2", room2)
+
+	var alice1 = newTestConn(t, room1, "alice")
+	var alice2 = newTestConn(t, room1, "alice")
+	var bob = newTestConn(t, room1, "bob")
+	var carol = newTestConn(t, room2, "carol")
+	joinConn(t, room1, alice1)
+	joinConn(t, room1, alice2)
+	joinConn(t, room1, bob)
+	joinConn(t, room2, carol)
+
+	var got = c.GetRoomUsers("room1")
+	if !equalSlices(got, []string{"alice", "alice", "bob"}) {
+		t.Fatalf("room1 users = %v, want [alice alice bob]", got)
+	}
+	if got = c.GetRoomUsers("room2"); !equalSlices(got, []string{"carol"}) {
+		t.Fatalf("room2 users = %v, want [carol]", got)
+	}
+	room1.leave(alice1)
+	if got = c.GetRoomUsers("room1"); !equalSlices(got, []string{"alice", "bob"}) {
+		t.Fatalf("room1 users after leave = %v, want [alice bob]", got)
+	}
+	room1.leave(alice2)
+	room1.leave(bob)
+	room2.leave(carol)
+	room1.wgReaders.Done()
+	room1.wgReaders.Done()
+	room1.wgReaders.Done()
+	room2.wgReaders.Done()
+	waitForRoomClose(t, c)
+}
+
+func TestCollabGetRoomUsersRoomWithoutConns(t *testing.T) {
+	var c = newTestCollab(t, nil, nil)
+	c.rooms.set("room1", newTestRoom(t, c, "room1", "hello", nil))
+	if got := c.GetRoomUsers("room1"); len(got) != 0 {
+		t.Fatalf("expected no users in a room without conns, got %v", got)
+	}
+}
+
+func TestCollabGetRoomUsersRoomMissing(t *testing.T) {
+	var c = newTestCollab(t, nil, nil)
+	if got := c.GetRoomUsers("missing"); got != nil {
+		t.Fatalf("expected nil for a missing room, got %v", got)
+	}
+}
+
+func TestCollabGetRoomUsersConcurrentJoinLeave(t *testing.T) {
+	var c = newTestCollab(t, nil, nil)
+	var r = newTestRoom(t, c, "room1", "hello", nil)
+	c.rooms.set("room1", r)
+	var wg sync.WaitGroup
+	for i := range 4 {
+		wg.Go(func() {
+			var cn = &conn{userId: fmt.Sprintf("user-%d", i)}
+			for range 100 {
+				r.conns.set(cn)
+				c.GetRoomUsers("room1")
+				r.conns.delete(cn)
+			}
+		})
+	}
+	for range 1000 {
+		c.GetRoomUsers("room1")
+	}
+	wg.Wait()
+	if got := len(c.GetRoomUsers("room1")); got != 0 {
+		t.Fatalf("expected no users after all conns left, got %d", got)
+	}
+}
+
 func TestCollabGetRoomsAll(t *testing.T) {
 	var c = newTestCollab(t, nil, nil)
 	c.rooms.set("room1", newTestRoom(t, c, "room1", "hello", nil))

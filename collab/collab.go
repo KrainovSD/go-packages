@@ -158,6 +158,19 @@ func (c *Collab) GetContent(roomId string) []byte {
 	return []byte(rm.text.ToString())
 }
 
+func (c *Collab) GetRoomUsers(roomId string) []string {
+	var rm = c.rooms.get(roomId)
+	if rm == nil {
+		return nil
+	}
+	var conns = rm.conns.val()
+	var userIds = make([]string, 0, len(conns))
+	for _, conn := range conns {
+		userIds = append(userIds, conn.userId)
+	}
+	return userIds
+}
+
 func (c *Collab) SyncDoc(roomId string, doc *crdt.Doc) error {
 	if doc == nil {
 		return fmt.Errorf("collab: doc must be passed")
