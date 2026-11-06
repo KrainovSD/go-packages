@@ -17,6 +17,8 @@ import (
 
 const awarenessExpiryTimeout = 30 * time.Second
 
+var roomVersionSeed atomic.Uint64
+
 type room struct {
 	c          *Collab
 	name       string
@@ -28,6 +30,7 @@ type room struct {
 	mu         sync.Mutex
 	closed     bool
 	dirty      atomic.Bool
+	version    atomic.Uint64
 	wgReaders  sync.WaitGroup
 }
 
@@ -54,6 +57,7 @@ func newRoom(c *Collab, name string, document string, snapshot []byte) *room {
 		aw:    awareness.New(uint64(doc.ClientID())),
 		conns: newConns(),
 	}
+	r.version.Store(roomVersionSeed.Add(1) << 32)
 	r.saveWorker = newSerializedDebounceIntervalWorker(func() {
 		r.mu.Lock()
 		if r.closed || !r.dirty.Swap(false) {
@@ -71,6 +75,7 @@ func newRoom(c *Collab, name string, document string, snapshot []byte) *room {
 		}
 		r.broadcast(syncFrame(ysync.EncodeUpdate(update)))
 		r.dirty.Store(true)
+		r.version.Add(1)
 		r.saveWorker.do()
 	})
 	r.aw.OnUpdate(func(evt awareness.UpdateEvent) {

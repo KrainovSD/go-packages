@@ -158,6 +158,24 @@ func (c *Collab) GetContent(roomId string) []byte {
 	return []byte(rm.text.ToString())
 }
 
+func (c *Collab) GetContentVersion(roomId string) uint64 {
+	var rm = c.rooms.get(roomId)
+	if rm == nil {
+		return 0
+	}
+	return rm.version.Load()
+}
+
+func (c *Collab) GetContentSnapshot(roomId string) (uint64, []byte) {
+	var rm = c.rooms.get(roomId)
+	if rm == nil {
+		return 0, nil
+	}
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+	return rm.version.Load(), []byte(rm.text.ToString())
+}
+
 func (c *Collab) GetRoomUsers(roomId string) []string {
 	var rm = c.rooms.get(roomId)
 	if rm == nil {

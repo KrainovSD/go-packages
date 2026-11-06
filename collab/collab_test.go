@@ -370,6 +370,149 @@ func TestCollabGetContent(t *testing.T) {
 	}
 }
 
+func TestCollabGetContentVersion(t *testing.T) {
+	var c = newTestCollab(t, nil, nil)
+	var r = newTestRoom(t, c, "room1", "hello", nil)
+	c.rooms.set("room1", r)
+	var initial = c.GetContentVersion("room1")
+	if initial == 0 {
+		t.Fatal("version of a live room must not be zero")
+	}
+	var foreign = crdt.New(crdt.WithClientID(51))
+	if err := crdt.ApplyUpdateV1(foreign, r.doc.EncodeStateAsUpdate(), nil); err != nil {
+		t.Fatalf("sync foreign doc with room state: %v", err)
+	}
+	foreign.Transact(func(txn *crdt.Transaction) {
+		txn.GetText(textName).Insert(txn, 5, " world", nil)
+	}, nil)
+	if _, err := c.ApplyPatch("room1", frameSync(ysync.EncodeUpdate(foreign.EncodeStateAsUpdate()))); err != nil {
+		t.Fatalf("ApplyPatch: %v", err)
+	}
+	if got := c.GetContentVersion("room1"); got != initial+1 {
+		t.Fatalf("version = %d after one update, want %d", got, initial+1)
+	}
+}
+
+func TestCollabGetContentVersionRoomMissing(t *testing.T) {
+	var c = newTestCollab(t, nil, nil)
+	if got := c.GetContentVersion("missing"); got != 0 {
+		t.Fatalf("expected 0 for a missing room, got %d", got)
+	}
+}
+
+func TestCollabGetContentVersionNoBumpOnKnownUpdate(t *testing.T) {
+	var c = newTestCollab(t, nil, nil)
+	var r = newTestRoom(t, c, "room1", "hello", nil)
+	c.rooms.set("room1", r)
+	var initial = c.GetContentVersion("room1")
+	var foreign = crdt.New(crdt.WithClientID(52))
+	if err := crdt.ApplyUpdateV1(foreign, r.doc.EncodeStateAsUpdate(), nil); err != nil {
+		t.Fatalf("sync foreign doc with room state: %v", err)
+	}
+	if _, err := c.ApplyPatch("room1", frameSync(ysync.EncodeUpdate(foreign.EncodeStateAsUpdate()))); err != nil {
+		t.Fatalf("ApplyPatch: %v", err)
+	}
+	if got := c.GetContentVersion("room1"); got != initial {
+		t.Fatalf("version must not change on an already-known update, got %d, want %d", got, initial)
+	}
+}
+
+func TestCollabGetContentSnapshot(t *testing.T) {
+	var c = newTestCollab(t, nil, nil)
+	var r = newTestRoom(t, c, "room1", "hello", nil)
+	c.rooms.set("room1", r)
+	var version, content = c.GetContentSnapshot("room1")
+	if version != c.GetContentVersion("room1") {
+		t.Fatalf("snapshot version = %d, want %d", version, c.GetContentVersion("room1"))
+	}
+	if string(content) != "hello" {
+		t.Fatalf("snapshot content = %q, want %q", content, "hello")
+	}
+	var foreign = crdt.New(crdt.WithClientID(53))
+	if err := crdt.ApplyUpdateV1(foreign, r.doc.EncodeStateAsUpdate(), nil); err != nil {
+		t.Fatalf("sync foreign doc with room state: %v", err)
+	}
+	foreign.Transact(func(txn *crdt.Transaction) {
+		txn.GetText(textName).Insert(txn, 5, " world", nil)
+	}, nil)
+	if _, err := c.ApplyPatch("room1", frameSync(ysync.EncodeUpdate(foreign.EncodeStateAsUpdate()))); err != nil {
+		t.Fatalf("ApplyPatch: %v", err)
+	}
+	if version, content = c.GetContentSnapshot("room1"); version != c.GetContentVersion("room1") {
+		t.Fatalf("snapshot version = %d, want %d", version, c.GetContentVersion("room1"))
+	}
+	if string(content) != "hello world" {
+		t.Fatalf("snapshot content = %q, want %q", content, "hello world")
+	}
+}
+
+func TestCollabGetContentSnapshotRoomMissing(t *testing.T) {
+	var c = newTestCollab(t, nil, nil)
+	var version, content = c.GetContentSnapshot("missing")
+	if version != 0 || content != nil {
+		t.Fatalf("expected (0, nil) for a missing room, got (%d, %q)", version, content)
+	}
+}
+
+func TestCollabGetContentSnapshotConsistentUnderConcurrentPatches(t *testing.T) {
+	var c = newTestCollab(t, nil, nil)
+	var r = newTestRoom(t, c, "room1", "hello", nil)
+	c.rooms.set("room1", r)
+	var baseVersion, baseContent = c.GetContentSnapshot("room1")
+	if string(baseContent) != "hello" {
+		t.Fatalf("base content = %q, want %q", baseContent, "hello")
+	}
+	var baseState = r.doc.EncodeStateAsUpdate()
+	var done = make(chan struct{})
+	var checkers sync.WaitGroup
+	for range 2 {
+		checkers.Go(func() {
+			for {
+				select {
+				case <-done:
+					return
+				default:
+				}
+				var version, content = c.GetContentSnapshot("room1")
+				if version < baseVersion || len(content) != len(baseContent)+int(version-baseVersion) {
+					t.Errorf("torn snapshot: version=%d content len=%d, want len=%d",
+						version, len(content), len(baseContent)+int(version-baseVersion))
+					return
+				}
+			}
+		})
+	}
+	var patchers sync.WaitGroup
+	for i := range 4 {
+		patchers.Go(func() {
+			var foreign = crdt.New(crdt.WithClientID(crdt.ClientID(60 + i)))
+			if err := crdt.ApplyUpdateV1(foreign, baseState, nil); err != nil {
+				t.Errorf("sync foreign doc with room state: %v", err)
+				return
+			}
+			for range 25 {
+				foreign.Transact(func(txn *crdt.Transaction) {
+					txn.GetText(textName).Insert(txn, 0, "x", nil)
+				}, nil)
+				if _, err := c.ApplyPatch("room1", frameSync(ysync.EncodeUpdate(foreign.EncodeStateAsUpdate()))); err != nil {
+					t.Errorf("ApplyPatch: %v", err)
+					return
+				}
+			}
+		})
+	}
+	patchers.Wait()
+	close(done)
+	checkers.Wait()
+	var version, content = c.GetContentSnapshot("room1")
+	if version != baseVersion+100 {
+		t.Fatalf("final version = %d, want %d", version, baseVersion+100)
+	}
+	if len(content) != len(baseContent)+100 {
+		t.Fatalf("final content len = %d, want %d", len(content), len(baseContent)+100)
+	}
+}
+
 func TestCollabApplyPatch(t *testing.T) {
 	var c = newTestCollab(t, nil, nil)
 	var r = newTestRoom(t, c, "room1", "hello", nil)

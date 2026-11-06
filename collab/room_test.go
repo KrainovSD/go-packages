@@ -48,6 +48,35 @@ func TestNewRoomCorruptSnapshotFallback(t *testing.T) {
 	}
 }
 
+func TestNewRoomVersionUniqueAcrossIncarnations(t *testing.T) {
+	var c = newTestCollab(t, nil, nil)
+	var first = newTestRoom(t, c, "doc1", "hello", nil)
+	var second = newTestRoom(t, c, "doc1", "hello", nil)
+	var v1 = first.version.Load()
+	var v2 = second.version.Load()
+	if v1 == 0 || v2 == 0 {
+		t.Fatalf("versions must be non-zero, got %d and %d", v1, v2)
+	}
+	if v1>>32 == v2>>32 {
+		t.Fatalf("room incarnations must get distinct version ranges, got %d and %d", v1, v2)
+	}
+	if v2 <= v1 {
+		t.Fatalf("reopened room version %d must exceed the previous %d", v2, v1)
+	}
+}
+
+func TestRoomVersionIncrementsOnLocalUpdate(t *testing.T) {
+	var c = newTestCollab(t, nil, nil)
+	var r = newTestRoom(t, c, "doc1", "hello", nil)
+	var initial = r.version.Load()
+	r.doc.Transact(func(txn *crdt.Transaction) {
+		r.text.Insert(txn, 5, " world", nil)
+	}, nil)
+	if got := r.version.Load(); got != initial+1 {
+		t.Fatalf("version = %d after one local update, want %d", got, initial+1)
+	}
+}
+
 func TestRoomJoinAndLeave(t *testing.T) {
 	var c = newTestCollab(t, nil, nil)
 	var r = newTestRoom(t, c, "doc1", "hello", nil)
