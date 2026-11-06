@@ -3,6 +3,7 @@ package collab
 import (
 	"cmp"
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -15,7 +16,9 @@ import (
 
 	"github.com/KrainovSD/go-packages/helpers"
 	"github.com/coder/websocket"
+	"github.com/reearth/ygo/crdt"
 	"github.com/reearth/ygo/encoding"
+	ysync "github.com/reearth/ygo/sync"
 )
 
 type mockDoc struct {
@@ -331,4 +334,24 @@ func equalSlices[T cmp.Ordered](a []T, b []T) bool {
 	slices.Sort(ca)
 	slices.Sort(cb)
 	return slices.Equal(ca, cb)
+}
+
+func newSyncedForeign(t *testing.T, r *room, id crdt.ClientID) *crdt.Doc {
+	t.Helper()
+	var foreign = crdt.New(crdt.WithClientID(id))
+	if err := crdt.ApplyUpdateV1(foreign, r.doc.EncodeStateAsUpdate(), nil); err != nil {
+		t.Fatalf("sync foreign doc with room state: %v", err)
+	}
+	return foreign
+}
+
+func insertOneChar(c *Collab, roomId string, foreign *crdt.Doc) error {
+	foreign.Transact(func(txn *crdt.Transaction) {
+		txn.GetText(textName).Insert(txn, 0, "x", nil)
+	}, nil)
+	var err error
+	if _, err = c.ApplyPatch(roomId, frameSync(ysync.EncodeUpdate(foreign.EncodeStateAsUpdate()))); err != nil {
+		return fmt.Errorf("apply patch: %w", err)
+	}
+	return nil
 }

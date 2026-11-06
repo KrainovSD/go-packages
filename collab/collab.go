@@ -176,6 +176,14 @@ func (c *Collab) GetContentSnapshot(roomId string) (uint64, []byte) {
 	return rm.version.Load(), []byte(rm.text.ToString())
 }
 
+func (c *Collab) SubscribeUpdate(roomId string, fn func(version uint64)) (func(), bool) {
+	var rm = c.rooms.get(roomId)
+	if rm == nil || fn == nil {
+		return func() {}, false
+	}
+	return rm.notifier.subscribe(fn)
+}
+
 func (c *Collab) GetRoomUsers(roomId string) []string {
 	var rm = c.rooms.get(roomId)
 	if rm == nil {

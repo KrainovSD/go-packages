@@ -513,6 +513,248 @@ func TestCollabGetContentSnapshotConsistentUnderConcurrentPatches(t *testing.T) 
 	}
 }
 
+func TestCollabSubscribeUpdateDeliversVersion(t *testing.T) {
+	var c = newTestCollab(t, nil, nil)
+	var r = newTestRoom(t, c, "room1", "hello", nil)
+	c.rooms.set("room1", r)
+	var got = make(chan uint64, 4)
+	var unsub, ok = c.SubscribeUpdate("room1", func(version uint64) { got <- version })
+	if !ok {
+		t.Fatal("expected successful subscribe to a live room")
+	}
+	defer unsub()
+	var foreign = newSyncedForeign(t, r, 71)
+	if err := insertOneChar(c, "room1", foreign); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	select {
+	case v := <-got:
+		if v != c.GetContentVersion("room1") {
+			t.Fatalf("delivered version = %d, want %d", v, c.GetContentVersion("room1"))
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("subscriber was not notified about the update")
+	}
+}
+
+func TestCollabSubscribeUpdateVersionsMonotonic(t *testing.T) {
+	var c = newTestCollab(t, nil, nil)
+	var r = newTestRoom(t, c, "room1", "hello", nil)
+	c.rooms.set("room1", r)
+	var final = c.GetContentVersion("room1") + 10
+	var got = make(chan uint64, 16)
+	var unsub, _ = c.SubscribeUpdate("room1", func(version uint64) { got <- version })
+	defer unsub()
+	var foreign = newSyncedForeign(t, r, 72)
+	for range 10 {
+		if err := insertOneChar(c, "room1", foreign); err != nil {
+			t.Fatalf("insert: %v", err)
+		}
+	}
+	var last uint64
+	var deadline = time.Now().Add(2 * time.Second)
+	for last != final {
+		select {
+		case v := <-got:
+			if v <= last {
+				t.Fatalf("version %d delivered after %d: must strictly increase", v, last)
+			}
+			last = v
+		case <-time.After(time.Until(deadline)):
+			t.Fatalf("final version %d was not delivered, last delivered %d", final, last)
+		}
+	}
+}
+
+func TestCollabSubscribeUpdateCallbackMayReadSnapshot(t *testing.T) {
+	var c = newTestCollab(t, nil, nil)
+	var r = newTestRoom(t, c, "room1", "hello", nil)
+	c.rooms.set("room1", r)
+	var got = make(chan string, 4)
+	var unsub, _ = c.SubscribeUpdate("room1", func(version uint64) {
+		var _, content = c.GetContentSnapshot("room1")
+		got <- string(content)
+	})
+	defer unsub()
+	var foreign = newSyncedForeign(t, r, 73)
+	if err := insertOneChar(c, "room1", foreign); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	select {
+	case content := <-got:
+		if content != "xhello" {
+			t.Fatalf("content seen by subscriber = %q, want %q", content, "xhello")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("subscriber callback did not complete (deadlock?)")
+	}
+}
+
+func TestCollabSubscribeUpdateUnsubscribeStopsDeliveryAndIdempotent(t *testing.T) {
+	var c = newTestCollab(t, nil, nil)
+	var r = newTestRoom(t, c, "room1", "hello", nil)
+	c.rooms.set("room1", r)
+	var got = make(chan uint64, 4)
+	var unsub, _ = c.SubscribeUpdate("room1", func(version uint64) { got <- version })
+	var foreign = newSyncedForeign(t, r, 74)
+	if err := insertOneChar(c, "room1", foreign); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	select {
+	case <-got:
+	case <-time.After(2 * time.Second):
+		t.Fatal("subscriber was not notified before unsubscribe")
+	}
+	unsub()
+	unsub()
+	if err := insertOneChar(c, "room1", foreign); err != nil {
+		t.Fatalf("insert after unsubscribe: %v", err)
+	}
+	select {
+	case v := <-got:
+		t.Fatalf("subscriber received version %d after unsubscribe", v)
+	case <-time.After(150 * time.Millisecond):
+	}
+}
+
+func TestCollabSubscribeUpdateRoomMissing(t *testing.T) {
+	var c = newTestCollab(t, nil, nil)
+	var unsub, ok = c.SubscribeUpdate("missing", func(uint64) {})
+	if ok {
+		t.Fatal("expected ok=false for a missing room")
+	}
+	unsub()
+}
+
+func TestCollabSubscribeUpdateNilCallback(t *testing.T) {
+	var c = newTestCollab(t, nil, nil)
+	var r = newTestRoom(t, c, "room1", "hello", nil)
+	c.rooms.set("room1", r)
+	var unsub, ok = c.SubscribeUpdate("room1", nil)
+	if ok {
+		t.Fatal("expected ok=false for a nil callback")
+	}
+	unsub()
+	var foreign = newSyncedForeign(t, r, 75)
+	if err := insertOneChar(c, "room1", foreign); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	if got := c.GetContentVersion("room1"); got == 0 {
+		t.Fatal("room must still work after a nil-callback subscribe")
+	}
+}
+
+func TestCollabSubscribeUpdateMultipleSubscribers(t *testing.T) {
+	var c = newTestCollab(t, nil, nil)
+	var r = newTestRoom(t, c, "room1", "hello", nil)
+	c.rooms.set("room1", r)
+	var first = make(chan uint64, 4)
+	var second = make(chan uint64, 4)
+	var unsub1, _ = c.SubscribeUpdate("room1", func(v uint64) { first <- v })
+	defer unsub1()
+	var unsub2, _ = c.SubscribeUpdate("room1", func(v uint64) { second <- v })
+	defer unsub2()
+	var foreign = newSyncedForeign(t, r, 76)
+	if err := insertOneChar(c, "room1", foreign); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	for name, ch := range map[string]chan uint64{"first": first, "second": second} {
+		select {
+		case <-ch:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("%s subscriber was not notified", name)
+		}
+	}
+}
+
+func TestCollabSubscribeUpdateConcurrentStress(t *testing.T) {
+	var c = newTestCollab(t, nil, nil)
+	var r = newTestRoom(t, c, "room1", "hello", nil)
+	c.rooms.set("room1", r)
+	var baseState = r.doc.EncodeStateAsUpdate()
+	var baseVersion = c.GetContentVersion("room1")
+	var subs = make([]chan uint64, 4)
+	for i := range subs {
+		subs[i] = make(chan uint64, 256)
+		var ch = subs[i]
+		c.SubscribeUpdate("room1", func(v uint64) { ch <- v })
+	}
+
+	var wg sync.WaitGroup
+	for i := range 4 {
+		wg.Go(func() {
+			var foreign = crdt.New(crdt.WithClientID(crdt.ClientID(80 + i)))
+			if err := crdt.ApplyUpdateV1(foreign, baseState, nil); err != nil {
+				t.Errorf("sync foreign doc: %v", err)
+				return
+			}
+			for range 25 {
+				if err := insertOneChar(c, "room1", foreign); err != nil {
+					t.Errorf("insert: %v", err)
+					return
+				}
+			}
+		})
+	}
+	wg.Go(func() {
+		for range 100 {
+			var unsub, _ = c.SubscribeUpdate("room1", func(uint64) {})
+			unsub()
+		}
+	})
+	wg.Wait()
+	var final = baseVersion + 100
+	for i, ch := range subs {
+		var last uint64
+		var deadline = time.Now().Add(3 * time.Second)
+		for last != final {
+			select {
+			case v := <-ch:
+				if v <= last {
+					t.Fatalf("sub %d: version %d after %d: must strictly increase", i, v, last)
+				}
+				last = v
+			case <-time.After(time.Until(deadline)):
+				t.Fatalf("sub %d: final version %d not delivered, last %d", i, final, last)
+			}
+		}
+	}
+}
+
+func TestCollabSubscribeUpdateClosedRoom(t *testing.T) {
+	var c = newTestCollab(t, nil, nil)
+	var r = newTestRoom(t, c, "room1", "hello", nil)
+	c.rooms.set("room1", r)
+	var got = make(chan uint64, 4)
+	var unsub, _ = c.SubscribeUpdate("room1", func(version uint64) { got <- version })
+	var foreign = newSyncedForeign(t, r, 77)
+	if err := insertOneChar(c, "room1", foreign); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	select {
+	case <-got:
+	case <-time.After(2 * time.Second):
+		t.Fatal("subscriber was not notified before room close")
+	}
+	c.LockRoom("room1")
+	r.close()
+	var noopUnsub, ok = c.SubscribeUpdate("room1", func(version uint64) { got <- version })
+	if ok {
+		t.Fatal("expected ok=false for a closed room")
+	}
+	noopUnsub()
+	if err := c.UnlockRoom("room1"); err != nil {
+		t.Fatalf("unlock: %v", err)
+	}
+	waitForRoomClose(t, c)
+	select {
+	case v := <-got:
+		t.Fatalf("subscriber received version %d after room close", v)
+	case <-time.After(150 * time.Millisecond):
+	}
+	unsub()
+}
+
 func TestCollabApplyPatch(t *testing.T) {
 	var c = newTestCollab(t, nil, nil)
 	var r = newTestRoom(t, c, "room1", "hello", nil)

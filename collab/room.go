@@ -27,6 +27,7 @@ type room struct {
 	text       *crdt.YText
 	aw         *awareness.Awareness
 	conns      *conns
+	notifier   *notifier
 	mu         sync.Mutex
 	closed     bool
 	dirty      atomic.Bool
@@ -58,6 +59,7 @@ func newRoom(c *Collab, name string, document string, snapshot []byte) *room {
 		conns: newConns(),
 	}
 	r.version.Store(roomVersionSeed.Add(1) << 32)
+	r.notifier = newNotifier(&r.version)
 	r.saveWorker = newSerializedDebounceIntervalWorker(func() {
 		r.mu.Lock()
 		if r.closed || !r.dirty.Swap(false) {
@@ -76,6 +78,7 @@ func newRoom(c *Collab, name string, document string, snapshot []byte) *room {
 		r.broadcast(syncFrame(ysync.EncodeUpdate(update)))
 		r.dirty.Store(true)
 		r.version.Add(1)
+		r.notifier.notify()
 		r.saveWorker.do()
 	})
 	r.aw.OnUpdate(func(evt awareness.UpdateEvent) {
@@ -125,6 +128,7 @@ func (r *room) close() {
 		return
 	}
 	r.closed = true
+	r.notifier.close()
 	r.mu.Unlock()
 	r.c.wgRoomClose.Go(func() {
 		r.saveWorker.close()
