@@ -49,7 +49,7 @@ func (c *Collab) join(name, userId string, ws *websocket.Conn, r *http.Request) 
 		if room == nil {
 			var err error
 			var document string
-			if document, err = c.doc.Get(context.Background(), name, r); err != nil {
+			if document, err = c.doc.Get(context.WithoutCancel(r.Context()), name, r); err != nil {
 				c.mutexes.unlock(name)
 				ws.Close(websocket.StatusInternalError, "can't get document")
 				return
