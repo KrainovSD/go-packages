@@ -21,3 +21,4 @@ gen/
 /pages
 /.vite-inspect
 /.env
+librocksdb.a
