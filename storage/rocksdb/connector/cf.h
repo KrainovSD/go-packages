@@ -50,6 +50,6 @@ typedef struct {
 
 enum cf_comparator_type { CF_COMPARATOR_U64_LE = 1 };
 
-rocksdb_options_t *cf_create(cf_opts_t *cfg);
+rocksdb_options_t *cf_create(cf_opts_t *cfg, rocksdb_cache_t *shared_cache);
 
 #endif // STORAGE_ROCKSDB_CONNECTOR_CF_H_

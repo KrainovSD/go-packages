@@ -46,6 +46,7 @@ typedef struct {
     const int *compression_levels;
     size_t compression_levels_size;
     opt_int_t max_open_files;
+    opt_size_t block_cache_size;
 } db_opts_t;
 
 typedef struct {
@@ -58,6 +59,7 @@ typedef struct {
     rocksdb_writeoptions_t **write_options;
     size_t writer_count;
     rocksdb_t *instance;
+    rocksdb_cache_t *shared_cache;
 } db_t;
 
 db_t *db_open(const char *path, db_opts_t *cfg, char **err);

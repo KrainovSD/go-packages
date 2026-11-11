@@ -147,12 +147,20 @@ db_t *db_open(const char *path, db_opts_t *cfg, char **err) {
         *err = strdup("oom");
         return NULL;
     }
+    if (cfg->block_cache_size.has) {
+        db->shared_cache =
+            rocksdb_cache_create_lru(cfg->block_cache_size.v);
+        if (db->shared_cache == NULL) {
+            *err = strdup("oom");
+            return NULL;
+        }
+    }
     cf_opts_t default_opts = {.name = "default"};
     db->cf_names[0] = strdup(default_opts.name);
-    db->cf_options[0] = cf_create(&default_opts);
+    db->cf_options[0] = cf_create(&default_opts, db->shared_cache);
     for (size_t i = 0; i < cfg->cf_count; i++) {
         db->cf_names[i + 1] = strdup(cfg->cf_opts[i]->name);
-        db->cf_options[i + 1] = cf_create(cfg->cf_opts[i]);
+        db->cf_options[i + 1] = cf_create(cfg->cf_opts[i], db->shared_cache);
     }
     for (size_t i = 0; i < db->reader_count; i++) {
         db->read_options[i] = db_create_reader(cfg->reader_opts[i]);
@@ -218,6 +226,10 @@ void db_close(db_t *db) {
     if (db->instance != NULL) {
         rocksdb_close(db->instance);
         db->instance = NULL;
+    }
+    if (db->shared_cache != NULL) {
+        rocksdb_cache_destroy(db->shared_cache);
+        db->shared_cache = NULL;
     }
     free(db);
 }

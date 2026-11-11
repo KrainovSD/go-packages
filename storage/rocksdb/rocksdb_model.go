@@ -51,6 +51,7 @@ type RocksDBOptions struct {
 	Compression                     *Compression
 	CompressionLevels               []Compression
 	MaxOpenFiles                    *int
+	BlockCacheSize                  *uint64
 }
 
 type ColumnFamilyOptions struct {
@@ -104,7 +105,7 @@ type ReaderOptions struct {
 
 func (opts RocksDBOptions) WithDefaults() *RocksDBOptions {
 	if opts.CompactionType == nil && opts.Compression == nil && len(opts.CompressionLevels) == 0 {
-		opts.CompressionLevels = []Compression{COMPRESSION_NO, COMPRESSION_LZ4HC, COMPRESSION_ZSTD}
+		opts.CompressionLevels = []Compression{COMPRESSION_NO, COMPRESSION_LZ4, COMPRESSION_ZSTD}
 	}
 	opts.MaxBackgroundJobs = valueOrDefault(opts.MaxBackgroundJobs, runtime.NumCPU())
 	opts.MaxTotalWalSize = valueOrDefault(opts.MaxTotalWalSize, uint64(64<<20))
@@ -113,12 +114,15 @@ func (opts RocksDBOptions) WithDefaults() *RocksDBOptions {
 	opts.MaxLogFileSize = valueOrDefault(opts.MaxLogFileSize, uint64(5<<20))
 	opts.DeleteObsoleteFilesPeriodMicros = valueOrDefault(opts.DeleteObsoleteFilesPeriodMicros, uint64(6*60*60*1_000_000))
 	opts.MaxOpenFiles = valueOrDefault(opts.MaxOpenFiles, 1024)
+	if len(opts.ColumnFamilies) > 0 {
+		opts.BlockCacheSize = valueOrDefault(opts.BlockCacheSize, uint64((len(opts.ColumnFamilies)*8)<<20))
+	}
 	return &opts
 }
 
 func (opts ColumnFamilyOptions) WithDefaults() ColumnFamilyOptions {
 	if opts.CompactionType == nil && opts.Compression == nil && len(opts.CompressionLevels) == 0 {
-		opts.CompressionLevels = []Compression{COMPRESSION_NO, COMPRESSION_LZ4HC, COMPRESSION_ZSTD}
+		opts.CompressionLevels = []Compression{COMPRESSION_NO, COMPRESSION_LZ4, COMPRESSION_ZSTD}
 	}
 	opts.MaxBackgroundJobs = valueOrDefault(opts.MaxBackgroundJobs, runtime.NumCPU())
 	opts.WriteBufferSize = valueOrDefault(opts.WriteBufferSize, uint64(4<<20))
@@ -137,7 +141,6 @@ func (opts ColumnFamilyOptions) WithDefaults() ColumnFamilyOptions {
 	if opts.Table != nil {
 		table = *opts.Table
 	}
-	table.BlockCacheSize = valueOrDefault(table.BlockCacheSize, uint64(8<<20))
 	table.BloomBitsPerKey = valueOrDefault(table.BloomBitsPerKey, 10.0)
 	table.BloomWholeKeyFiltering = valueOrDefault(table.BloomWholeKeyFiltering, true)
 	opts.Table = &table

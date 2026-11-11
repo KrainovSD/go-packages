@@ -203,13 +203,14 @@ static void cf_apply_opts(rocksdb_options_t *opts, cf_opts_t *cfg) {
 }
 
 static void cf_set_block_based_table_opts(rocksdb_options_t *opts,
-                                          cf_table_opts_t *cfg) {
-    if (cfg == NULL) {
+                                          cf_table_opts_t *cfg,
+                                          rocksdb_cache_t *shared_cache) {
+    if (cfg == NULL && shared_cache == NULL) {
         return;
     }
     rocksdb_block_based_table_options_t *table_opts =
         rocksdb_block_based_options_create();
-    if (cfg->bloom_bits_per_key.has) {
+    if (cfg != NULL && cfg->bloom_bits_per_key.has) {
         rocksdb_block_based_options_set_filter_policy(
             table_opts,
             rocksdb_filterpolicy_create_bloom_full(cfg->bloom_bits_per_key.v));
@@ -219,9 +220,11 @@ static void cf_set_block_based_table_opts(rocksdb_options_t *opts,
         }
     }
     rocksdb_cache_t *cache = NULL;
-    if (cfg->block_cache_size.has) {
+    if (cfg != NULL && cfg->block_cache_size.has) {
         cache = rocksdb_cache_create_lru(cfg->block_cache_size.v);
         rocksdb_block_based_options_set_block_cache(table_opts, cache);
+    } else if (shared_cache != NULL) {
+        rocksdb_block_based_options_set_block_cache(table_opts, shared_cache);
     }
 
     rocksdb_options_set_block_based_table_factory(opts, table_opts);
@@ -231,10 +234,10 @@ static void cf_set_block_based_table_opts(rocksdb_options_t *opts,
     }
 }
 
-rocksdb_options_t *cf_create(cf_opts_t *cfg) {
+rocksdb_options_t *cf_create(cf_opts_t *cfg, rocksdb_cache_t *shared_cache) {
     rocksdb_options_t *opts = rocksdb_options_create();
     cf_apply_opts(opts, cfg);
-    cf_set_block_based_table_opts(opts, cfg->table_opts);
+    cf_set_block_based_table_opts(opts, cfg->table_opts, shared_cache);
     if (cfg->merge_operator != NULL) {
         rocksdb_options_set_merge_operator(opts, cfg->merge_operator);
     }

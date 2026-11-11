@@ -38,6 +38,7 @@ func (o *RocksDBOptions) toC(arena *Arena) *C.db_opts_t {
 		compression_levels:                  cLevels,
 		compression_levels_size:             cLevelsSize,
 		max_open_files:                      optInt(o.MaxOpenFiles),
+		block_cache_size:                    optSize(o.BlockCacheSize),
 	}
 	return cOpts
 }
