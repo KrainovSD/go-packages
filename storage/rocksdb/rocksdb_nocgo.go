@@ -55,6 +55,14 @@ func (db *DB) DropAndRecreateCF(cf uint8) error {
 	return ErrCgoRequired
 }
 
+func (db *DB) Stats() (*Stats, error) {
+	return nil, ErrCgoRequired
+}
+
+func (db *DB) Metrics() (*Metrics, error) {
+	return nil, ErrCgoRequired
+}
+
 type SingleData struct{}
 
 func (d *SingleData) Close() {}

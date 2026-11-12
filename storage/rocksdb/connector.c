@@ -4,4 +4,5 @@
 #include "connector/db.c"
 #include "connector/helpers.c"
 #include "connector/read.c"
+#include "connector/stats.c"
 #include "connector/write.c"

@@ -128,6 +128,11 @@ db_t *db_open(const char *path, db_opts_t *cfg, char **err) {
         *err = strdup("cf confgs must not be NULL");
         return NULL;
     }
+    if (cfg->statistics_level.has &&
+        (cfg->statistics_level.v < 0 || cfg->statistics_level.v > 5)) {
+        *err = strdup("statistics level must be in range 0-5");
+        return NULL;
+    }
     size_t cf_total = cfg->cf_count + 1;
     db_t *db = calloc(1, sizeof(*db));
     if (!db) {
@@ -148,8 +153,7 @@ db_t *db_open(const char *path, db_opts_t *cfg, char **err) {
         return NULL;
     }
     if (cfg->block_cache_size.has) {
-        db->shared_cache =
-            rocksdb_cache_create_lru(cfg->block_cache_size.v);
+        db->shared_cache = rocksdb_cache_create_lru(cfg->block_cache_size.v);
         if (db->shared_cache == NULL) {
             *err = strdup("oom");
             return NULL;
@@ -172,10 +176,15 @@ db_t *db_open(const char *path, db_opts_t *cfg, char **err) {
     rocksdb_options_set_create_if_missing(opts, 1);
     rocksdb_options_set_create_missing_column_families(opts, 1);
     db_apply_opts(opts, cfg);
+    if (cfg->statistics_level.has && cfg->statistics_level.v > 0) {
+        rocksdb_options_enable_statistics(opts);
+        rocksdb_options_set_statistics_level(opts, cfg->statistics_level.v);
+        db->statistics_enabled = 1;
+    }
+    db->options = opts;
     db->instance = rocksdb_open_column_families(
         opts, path, cf_total, db->cf_names,
         (const rocksdb_options_t *const *)db->cf_options, db->cf_handles, err);
-    rocksdb_options_destroy(opts);
     return db;
 }
 
@@ -226,6 +235,10 @@ void db_close(db_t *db) {
     if (db->instance != NULL) {
         rocksdb_close(db->instance);
         db->instance = NULL;
+    }
+    if (db->options != NULL) {
+        rocksdb_options_destroy(db->options);
+        db->options = NULL;
     }
     if (db->shared_cache != NULL) {
         rocksdb_cache_destroy(db->shared_cache);

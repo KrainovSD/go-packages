@@ -8,6 +8,7 @@ package rocksdb
 #cgo CFLAGS: -I./connector
 #include "db.h"
 #include "read.h"
+#include "stats.h"
 #include "write.h"
 #include <stdlib.h>
 #include <string.h>
@@ -25,11 +26,13 @@ import (
 )
 
 type DB struct {
-	arenaChan chan *Arena
-	db        *C.db_t
-	idMutexes *helpers.KeyedMutex[uint32]
-	arenaSize uint64
-	arenaTTL  uint8
+	arenaChan      chan *Arena
+	db             *C.db_t
+	idMutexes      *helpers.KeyedMutex[uint32]
+	cachePerCF     []bool
+	metricsEnabled bool
+	arenaSize      uint64
+	arenaTTL       uint8
 }
 
 func NewRocksDB(ctx context.Context, opts DatabaseOptions) (*DB, error) {
@@ -63,12 +66,22 @@ func NewRocksDB(ctx context.Context, opts DatabaseOptions) (*DB, error) {
 		}
 		return nil, fmt.Errorf("open db: %w", err)
 	}
+	var cachePerCF = make([]bool, len(opts.Rocks.ColumnFamilies)+1)
+	for i := range cachePerCF {
+		cachePerCF[i] = opts.Rocks.BlockCacheSize == nil
+		if !cachePerCF[i] && i > 0 {
+			var table = opts.Rocks.ColumnFamilies[i-1].Table
+			cachePerCF[i] = table != nil && table.BlockCacheSize != nil
+		}
+	}
 	return &DB{
-		arenaChan: arenaChan,
-		db:        db,
-		idMutexes: helpers.NewKeyedMutex[uint32](),
-		arenaSize: opts.ArenaIntitialSize,
-		arenaTTL:  opts.ArenaTTL,
+		arenaChan:      arenaChan,
+		db:             db,
+		idMutexes:      helpers.NewKeyedMutex[uint32](),
+		cachePerCF:     cachePerCF,
+		metricsEnabled: opts.Rocks.StatisticsLevel != nil && *opts.Rocks.StatisticsLevel > 0,
+		arenaSize:      opts.ArenaIntitialSize,
+		arenaTTL:       opts.ArenaTTL,
 	}, nil
 }
 
@@ -359,4 +372,108 @@ func (db *DB) DropAndRecreateCF(cf uint8) error {
 		return fmt.Errorf("drop and recreate cf %d: %w", cf, err)
 	}
 	return nil
+}
+
+func (db *DB) Stats() (*Stats, error) {
+	var cDB C.db_stats_t
+	var cErr CError
+	C.db_stats(db.db, &cDB, &cErr.p)
+	if err := cErr.Error(); err != nil {
+		return nil, fmt.Errorf("db stats: %w", err)
+	}
+	var stats = &Stats{
+		DB: DBStats{
+			BackgroundErrors:          uint64(cDB.background_errors),
+			NumRunningCompactions:     uint64(cDB.num_running_compactions),
+			NumRunningFlushes:         uint64(cDB.num_running_flushes),
+			NumUnscheduledCompactions: uint64(cDB.num_unscheduled_compactions),
+			IsWriteStopped:            cDB.is_write_stopped != 0,
+			NumSnapshots:              uint64(cDB.num_snapshots),
+			OldestSnapshotTime:        uint64(cDB.oldest_snapshot_time),
+		},
+		ColumnFamilies: make([]CFStats, int(db.db.cf_count)),
+	}
+	for cf := range stats.ColumnFamilies {
+		var cCF C.cf_stats_t
+		C.db_cf_stats(db.db, C.uint8_t(cf), &cCF, &cErr.p)
+		if err := cErr.Error(); err != nil {
+			return nil, fmt.Errorf("cf %d stats: %w", cf, err)
+		}
+		stats.ColumnFamilies[cf] = CFStats{
+			EstimateNumKeys:          uint64(cCF.estimate_num_keys),
+			NumEntriesActiveMemTable: uint64(cCF.num_entries_active_mem_table),
+			NumEntriesImmMemTables:   uint64(cCF.num_entries_imm_mem_tables),
+			NumDeletesActiveMemTable: uint64(cCF.num_deletes_active_mem_table),
+			NumDeletesImmMemTables:   uint64(cCF.num_deletes_imm_mem_tables),
+			CurSizeActiveMemTable:    uint64(cCF.cur_size_active_mem_table),
+			CurSizeAllMemTables:      uint64(cCF.cur_size_all_mem_tables),
+			SizeAllMemTables:         uint64(cCF.size_all_mem_tables),
+			NumImmutableMemTable:     uint64(cCF.num_immutable_mem_table),
+			MemTableFlushPending:     cCF.mem_table_flush_pending != 0,
+			CompactionPending:        cCF.compaction_pending != 0,
+			TotalSSTFilesSize:        uint64(cCF.total_sst_files_size),
+			LiveSSTFilesSize:         uint64(cCF.live_sst_files_size),
+			ObsoleteSSTFilesSize:     uint64(cCF.obsolete_sst_files_size),
+			NumFilesAtLevel: [7]uint64{
+				uint64(cCF.num_files_at_level[0]),
+				uint64(cCF.num_files_at_level[1]),
+				uint64(cCF.num_files_at_level[2]),
+				uint64(cCF.num_files_at_level[3]),
+				uint64(cCF.num_files_at_level[4]),
+				uint64(cCF.num_files_at_level[5]),
+				uint64(cCF.num_files_at_level[6]),
+			},
+			EstimateTableReadersMem:        uint64(cCF.estimate_table_readers_mem),
+			EstimatePendingCompactionBytes: uint64(cCF.estimate_pending_compaction_bytes),
+			EstimateLiveDataSize:           uint64(cCF.estimate_live_data_size),
+			BaseLevel:                      uint64(cCF.base_level),
+			BlockCacheUsage:                uint64(cCF.block_cache_usage),
+			BlockCachePinnedUsage:          uint64(cCF.block_cache_pinned_usage),
+			BlockCacheCapacity:             uint64(cCF.block_cache_capacity),
+			NumLiveVersions:                uint64(cCF.num_live_versions),
+		}
+	}
+	var sharedCacheUsage uint64
+	for i, cfStats := range stats.ColumnFamilies {
+		stats.Memory.MemTableTotal += cfStats.SizeAllMemTables
+		stats.Memory.MemTableUnflushed += cfStats.CurSizeAllMemTables
+		stats.Memory.TableReaders += cfStats.EstimateTableReadersMem
+		if db.cachePerCF[i] {
+			stats.Memory.CacheTotal += cfStats.BlockCacheUsage
+		} else {
+			sharedCacheUsage = cfStats.BlockCacheUsage
+		}
+	}
+	stats.Memory.CacheTotal += sharedCacheUsage
+	return stats, nil
+}
+
+func (db *DB) Metrics() (*Metrics, error) {
+	if !db.metricsEnabled {
+		return nil, ErrMetricsDisabled
+	}
+	var cMetrics C.metrics_t
+	var cErr CError
+	C.db_metrics(db.db, &cMetrics, &cErr.p)
+	if err := cErr.Error(); err != nil {
+		return nil, fmt.Errorf("metrics: %w", err)
+	}
+	var metrics = &Metrics{}
+	for i, count := range cMetrics.tickers {
+		metrics.Tickers[i] = uint64(count)
+	}
+	for i, histogram := range cMetrics.histograms {
+		metrics.Histograms[i] = HistogramData{
+			Count:   uint64(histogram.count),
+			Sum:     uint64(histogram.sum),
+			Min:     float64(histogram.min),
+			Max:     float64(histogram.max),
+			Median:  float64(histogram.median),
+			P95:     float64(histogram.p95),
+			P99:     float64(histogram.p99),
+			Average: float64(histogram.average),
+			StdDev:  float64(histogram.std_dev),
+		}
+	}
+	return metrics, nil
 }
