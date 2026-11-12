@@ -7,6 +7,7 @@ package rocksdb
 #cgo LDFLAGS: -lstdc++ -lm -lpthread -ldl -lsnappy -lz -lbz2 -llz4 -lzstd -luring
 #cgo CFLAGS: -I./connector
 #include "db.h"
+#include "perf.h"
 #include "read.h"
 #include "stats.h"
 #include "write.h"
@@ -476,4 +477,30 @@ func (db *DB) Metrics() (*Metrics, error) {
 		}
 	}
 	return metrics, nil
+}
+
+func (db *DB) WithPerf(level PerfLevel, fn func() error) (*PerfMetrics, error) {
+	if fn == nil {
+		return nil, fmt.Errorf("perf: fn must not be nil")
+	}
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	var cPerf C.perf_t
+	var cErr CError
+	C.perf_open(&cPerf, C.int(int(level)), &cErr.p)
+	if err := cErr.Error(); err != nil {
+		return nil, fmt.Errorf("perf: %w", err)
+	}
+	defer C.perf_close(&cPerf)
+	var fnErr = fn()
+	var cMetrics C.perf_metrics_t
+	C.perf_metrics(&cPerf, &cMetrics, &cErr.p)
+	if err := cErr.Error(); err != nil {
+		return nil, fmt.Errorf("perf: %w", err)
+	}
+	var metrics = &PerfMetrics{}
+	for i, value := range cMetrics.values {
+		metrics.Values[i] = uint64(value)
+	}
+	return metrics, fnErr
 }

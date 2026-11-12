@@ -395,3 +395,82 @@ const (
 	HISTOGRAM_BYTES_PER_MULTIGET           HistogramID = 33
 	HISTOGRAM_FLUSH_TIME                   HistogramID = 50
 )
+
+type PerfLevel int
+
+const (
+	PERF_LEVEL_DISABLE                              PerfLevel = 1
+	PERF_LEVEL_ENABLE_COUNT                         PerfLevel = 2
+	PERF_LEVEL_ENABLE_WAIT                          PerfLevel = 3
+	PERF_LEVEL_ENABLE_TIME_EXCEPT_FOR_MUTEX         PerfLevel = 4
+	PERF_LEVEL_ENABLE_TIME_AND_CPU_EXCEPT_FOR_MUTEX PerfLevel = 5
+	PERF_LEVEL_ENABLE_TIME                          PerfLevel = 6
+)
+
+const PERF_METRICS_COUNT = 84
+
+type PerfMetrics struct {
+	Values [PERF_METRICS_COUNT]uint64
+}
+
+type PerfMetricID uint32
+
+const (
+	PERF_USER_KEY_COMPARISON_COUNT         PerfMetricID = 0
+	PERF_BLOCK_CACHE_HIT_COUNT             PerfMetricID = 1
+	PERF_BLOCK_READ_COUNT                  PerfMetricID = 2
+	PERF_BLOCK_READ_BYTE                   PerfMetricID = 3
+	PERF_BLOCK_READ_TIME                   PerfMetricID = 4
+	PERF_BLOCK_CHECKSUM_TIME               PerfMetricID = 5
+	PERF_BLOCK_DECOMPRESS_TIME             PerfMetricID = 6
+	PERF_GET_READ_BYTES                    PerfMetricID = 7
+	PERF_MULTIGET_READ_BYTES               PerfMetricID = 8
+	PERF_ITER_READ_BYTES                   PerfMetricID = 9
+	PERF_INTERNAL_KEY_SKIPPED_COUNT        PerfMetricID = 10
+	PERF_INTERNAL_DELETE_SKIPPED_COUNT     PerfMetricID = 11
+	PERF_INTERNAL_RECENT_SKIPPED_COUNT     PerfMetricID = 12
+	PERF_INTERNAL_MERGE_COUNT              PerfMetricID = 13
+	PERF_GET_SNAPSHOT_TIME                 PerfMetricID = 14
+	PERF_GET_FROM_MEMTABLE_TIME            PerfMetricID = 15
+	PERF_GET_FROM_MEMTABLE_COUNT           PerfMetricID = 16
+	PERF_GET_POST_PROCESS_TIME             PerfMetricID = 17
+	PERF_GET_FROM_OUTPUT_FILES_TIME        PerfMetricID = 18
+	PERF_SEEK_ON_MEMTABLE_TIME             PerfMetricID = 19
+	PERF_SEEK_ON_MEMTABLE_COUNT            PerfMetricID = 20
+	PERF_NEXT_ON_MEMTABLE_COUNT            PerfMetricID = 21
+	PERF_PREV_ON_MEMTABLE_COUNT            PerfMetricID = 22
+	PERF_SEEK_CHILD_SEEK_TIME              PerfMetricID = 23
+	PERF_SEEK_CHILD_SEEK_COUNT             PerfMetricID = 24
+	PERF_SEEK_MIN_HEAP_TIME                PerfMetricID = 25
+	PERF_SEEK_MAX_HEAP_TIME                PerfMetricID = 26
+	PERF_SEEK_INTERNAL_SEEK_TIME           PerfMetricID = 27
+	PERF_FIND_NEXT_USER_ENTRY_TIME         PerfMetricID = 28
+	PERF_WRITE_WAL_TIME                    PerfMetricID = 29
+	PERF_WRITE_MEMTABLE_TIME               PerfMetricID = 30
+	PERF_WRITE_DELAY_TIME                  PerfMetricID = 31
+	PERF_WRITE_PRE_AND_POST_PROCESS_TIME   PerfMetricID = 32
+	PERF_DB_MUTEX_LOCK_NANOS               PerfMetricID = 33
+	PERF_DB_CONDITION_WAIT_NANOS           PerfMetricID = 34
+	PERF_MERGE_OPERATOR_TIME_NANOS         PerfMetricID = 35
+	PERF_READ_INDEX_BLOCK_NANOS            PerfMetricID = 36
+	PERF_READ_FILTER_BLOCK_NANOS           PerfMetricID = 37
+	PERF_NEW_TABLE_BLOCK_ITER_NANOS        PerfMetricID = 38
+	PERF_NEW_TABLE_ITERATOR_NANOS          PerfMetricID = 39
+	PERF_BLOCK_SEEK_NANOS                  PerfMetricID = 40
+	PERF_FIND_TABLE_NANOS                  PerfMetricID = 41
+	PERF_BLOOM_MEMTABLE_HIT_COUNT          PerfMetricID = 42
+	PERF_BLOOM_MEMTABLE_MISS_COUNT         PerfMetricID = 43
+	PERF_BLOOM_SST_HIT_COUNT               PerfMetricID = 44
+	PERF_BLOOM_SST_MISS_COUNT              PerfMetricID = 45
+	PERF_KEY_LOCK_WAIT_TIME                PerfMetricID = 46
+	PERF_KEY_LOCK_WAIT_COUNT               PerfMetricID = 47
+	PERF_NUMBER_ASYNC_SEEK                 PerfMetricID = 68
+	PERF_INTERNAL_RANGE_DEL_RESEEK_COUNT   PerfMetricID = 75
+	PERF_BLOCK_READ_CPU_TIME               PerfMetricID = 76
+	PERF_INTERNAL_MERGE_POINT_LOOKUP_COUNT PerfMetricID = 77
+	PERF_DATA_BLOCK_READ_BYTE              PerfMetricID = 78
+	PERF_INDEX_BLOCK_READ_BYTE             PerfMetricID = 79
+	PERF_FILTER_BLOCK_READ_BYTE            PerfMetricID = 80
+	PERF_COMPRESSION_DICT_BLOCK_READ_BYTE  PerfMetricID = 81
+	PERF_METADATA_BLOCK_READ_BYTE          PerfMetricID = 82
+)

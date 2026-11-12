@@ -63,6 +63,10 @@ func (db *DB) Metrics() (*Metrics, error) {
 	return nil, ErrCgoRequired
 }
 
+func (db *DB) WithPerf(level PerfLevel, fn func() error) (*PerfMetrics, error) {
+	return nil, ErrCgoRequired
+}
+
 type SingleData struct{}
 
 func (d *SingleData) Close() {}
