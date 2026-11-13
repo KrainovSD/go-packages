@@ -71,6 +71,10 @@ void db_close(db_t *db);
 
 void db_cf_drop_and_recreate(db_t *db, uint8_t cf_index, char **err);
 
+void db_set_options(db_t *db, db_opts_t *cfg, char **err);
+
+void db_cf_set_options(db_t *db, uint8_t cf_index, cf_opts_t *cfg, char **err);
+
 void db_is_valid(db_t *db, char **err);
 
 void db_reader_is_valid(db_t *db, uint8_t reader_index, char **err);

@@ -273,6 +273,43 @@ void db_cf_drop_and_recreate(db_t *db, uint8_t cf_index, char **err) {
     }
 }
 
+void db_set_options(db_t *db, db_opts_t *cfg, char **err) {
+    db_is_valid(db, err);
+    if (*err) {
+        return;
+    }
+    if (cfg == NULL) {
+        return;
+    }
+    opts_kv_t kv = {0};
+    opts_kv_add_int(&kv, "max_background_jobs", cfg->max_background_jobs);
+    opts_kv_add_u64(&kv, "max_total_wal_size", cfg->max_total_wal_size);
+    opts_kv_add_unsigned(&kv, "stats_dump_period_sec",
+                         cfg->stats_dump_period_sec);
+    opts_kv_add_u64(&kv, "delete_obsolete_files_period_micros",
+                    cfg->delete_obsolete_files_period_micros);
+    opts_kv_add_int(&kv, "max_open_files", cfg->max_open_files);
+    if (kv.count == 0) {
+        return;
+    }
+    rocksdb_set_db_options(db->instance, kv.count, kv.keys, kv.values, err);
+}
+
+void db_cf_set_options(db_t *db, uint8_t cf_index, cf_opts_t *cfg, char **err) {
+    if (err) {
+        *err = NULL;
+    }
+    db_is_valid(db, err);
+    if (*err) {
+        return;
+    }
+    db_cf_is_valid(db, cf_index, err);
+    if (*err) {
+        return;
+    }
+    cf_set_options(db->instance, db->cf_handles[cf_index], cfg, err);
+}
+
 void db_is_valid(db_t *db, char **err) {
     if (db == NULL || db->instance == NULL) {
         *err = strdup("db is not open");

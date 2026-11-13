@@ -489,6 +489,173 @@ func TestDropAndRecreateCFConcurrent(t *testing.T) {
 	wg.Wait()
 }
 
+func TestSetOptions(t *testing.T) {
+	var db = testDatabase(t)
+	var err error
+	if err = db.SetOptions(MutableDBOptions{
+		MaxBackgroundJobs:               new(2),
+		MaxTotalWalSize:                 new(uint64(32 << 20)),
+		StatsDumpPeriodSec:              new(uint32(600)),
+		DeleteObsoleteFilesPeriodMicros: new(uint64(30 * 60 * 1_000_000)),
+		MaxOpenFiles:                    new(512),
+	}); err != nil {
+		t.Fatalf("set options: %v", err)
+	}
+	if err = db.Write(3, 0, OPERATION_PUT, []byte("k1"), []byte("v1")); err != nil {
+		t.Fatalf("write after set options: %v", err)
+	}
+	if err = db.SetOptions(MutableDBOptions{MaxOpenFiles: new(-1)}); err != nil {
+		t.Fatalf("set options partial: %v", err)
+	}
+}
+
+func TestSetCFOptions(t *testing.T) {
+	var db = testDatabase(t)
+	var err error
+	if err = db.SetCFOptions(3, MutableCFOptions{
+		WriteBufferSize:                new(uint64(8 << 20)),
+		MaxWriteBufferNumber:           new(6),
+		TargetFileSizeBase:             new(uint64(16 << 20)),
+		TargetFileSizeMultiplier:       new(2),
+		MaxBytesForLevelBase:           new(uint64(128 << 20)),
+		MaxBytesForLevelMultiplier:     new(12.5),
+		Level0FileNumCompactionTrigger: new(8),
+		Level0SlowdownWritesTrigger:    new(24),
+		Level0StopWritesTrigger:        new(48),
+		Compression:                    new(COMPRESSION_ZSTD),
+		TTL:                            new(uint64(86400)),
+	}); err != nil {
+		t.Fatalf("set cf options: %v", err)
+	}
+	if err = db.SetCFOptions(4, MutableCFOptions{
+		CompressionLevels: []Compression{COMPRESSION_NO, COMPRESSION_LZ4, COMPRESSION_ZSTD},
+	}); err != nil {
+		t.Fatalf("set cf compression levels: %v", err)
+	}
+	if err = db.Write(3, 0, OPERATION_PUT, []byte("k1"), []byte("v1")); err != nil {
+		t.Fatalf("write after set cf options: %v", err)
+	}
+	if err = db.SetCFOptions(200, MutableCFOptions{Compression: new(COMPRESSION_LZ4)}); err == nil {
+		t.Fatal("set cf options out of range: expected error, got nil")
+	}
+	if err = db.SetCFOptions(3, MutableCFOptions{Compression: new(Compression(99))}); err == nil {
+		t.Fatal("set cf options unknown compression: expected error, got nil")
+	}
+}
+
+func TestSetCFOptionsCompressionChange(t *testing.T) {
+	var opts = testDatabaseOptions(t)
+	opts.Rocks.ColumnFamilies[3].CompressionLevels = []Compression{
+		COMPRESSION_LZ4, COMPRESSION_LZ4, COMPRESSION_LZ4,
+	}
+	var db, err = NewRocksDB(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("new rocksdb: %v", err)
+	}
+	var first = fmt.Appendf(nil, "first:%s", bytes.Repeat([]byte("a"), 8<<10))
+	if err = db.Write(3, 0, OPERATION_PUT, []byte("k1"), first); err != nil {
+		t.Fatalf("write k1: %v", err)
+	}
+	db.Close()
+	if db, err = NewRocksDB(context.Background(), opts); err != nil {
+		t.Fatalf("reopen rocksdb: %v", err)
+	}
+	t.Cleanup(db.Close)
+	var single *SingleData
+	if single, err = db.Read(3, 0, []byte("k1")); err != nil {
+		t.Fatalf("read k1 from sst: %v", err)
+	}
+	if got := single.Read(); !bytes.Equal(got, first) {
+		t.Fatalf("k1 from sst = %d bytes, want %d", len(got), len(first))
+	}
+	single.Close()
+	if err = db.SetCFOptions(3, MutableCFOptions{
+		Compression:       new(COMPRESSION_ZSTD),
+		CompressionLevels: []Compression{COMPRESSION_ZSTD, COMPRESSION_ZSTD, COMPRESSION_ZSTD},
+	}); err != nil {
+		t.Fatalf("set cf compression: %v", err)
+	}
+	if single, err = db.Read(3, 0, []byte("k1")); err != nil {
+		t.Fatalf("read k1 after compression change: %v", err)
+	}
+	if got := single.Read(); !bytes.Equal(got, first) {
+		t.Fatalf("k1 after compression change = %d bytes, want %d", len(got), len(first))
+	}
+	single.Close()
+	var second = fmt.Appendf(nil, "second:%s", bytes.Repeat([]byte("b"), 8<<10))
+	if err = db.Write(3, 0, OPERATION_PUT, []byte("k2"), second); err != nil {
+		t.Fatalf("write k2: %v", err)
+	}
+	for key, want := range map[string][]byte{"k1": first, "k2": second} {
+		if single, err = db.Read(3, 0, []byte(key)); err != nil {
+			t.Fatalf("read %s after compression change: %v", key, err)
+		}
+		if got := single.Read(); !bytes.Equal(got, want) {
+			t.Fatalf("%s after compression change = %d bytes, want %d", key, len(got), len(want))
+		}
+		single.Close()
+	}
+}
+
+func TestSetCFOptionsAppliedViaStats(t *testing.T) {
+	var db = testDatabase(t)
+	var err error
+	var value = bytes.Repeat([]byte("v"), 8<<10)
+	for i := range 64 {
+		if err = db.Write(3, 0, OPERATION_PUT, fmt.Appendf(nil, "k%d", i), value); err != nil {
+			t.Fatalf("write with default options: %v", err)
+		}
+	}
+	var stats *Stats
+	if stats, err = db.Stats(); err != nil {
+		t.Fatalf("stats with default options: %v", err)
+	}
+	var cfStats = stats.ColumnFamilies[3]
+	if cfStats.TotalSSTFilesSize != 0 {
+		t.Fatalf("total sst files size = %d, want 0 with default 4MB write buffer", cfStats.TotalSSTFilesSize)
+	}
+	var files uint64
+	for _, level := range cfStats.NumFilesAtLevel {
+		files += level
+	}
+	if files != 0 {
+		t.Fatalf("num files at levels = %d, want 0 with default 4MB write buffer", files)
+	}
+
+	if err = db.SetCFOptions(3, MutableCFOptions{WriteBufferSize: new(uint64(64 << 10))}); err != nil {
+		t.Fatalf("set cf write buffer size: %v", err)
+	}
+	for i := range 64 {
+		if err = db.Write(3, 0, OPERATION_PUT, fmt.Appendf(nil, "s%d", i), value); err != nil {
+			t.Fatalf("write after write buffer size change: %v", err)
+		}
+	}
+	if stats, err = db.Stats(); err != nil {
+		t.Fatalf("stats after write buffer size change: %v", err)
+	}
+	cfStats = stats.ColumnFamilies[3]
+	if cfStats.TotalSSTFilesSize == 0 {
+		t.Fatal("total sst files size = 0, want > 0 after write buffer size change")
+	}
+	files = 0
+	for _, level := range cfStats.NumFilesAtLevel {
+		files += level
+	}
+	if files == 0 {
+		t.Fatal("num files at levels = 0, want > 0 after write buffer size change")
+	}
+	var single *SingleData
+	for _, key := range []string{"k0", "s0", "k63", "s63"} {
+		if single, err = db.Read(3, 0, []byte(key)); err != nil {
+			t.Fatalf("read %s after flush: %v", key, err)
+		}
+		if got := single.Read(); !bytes.Equal(got, value) {
+			t.Fatalf("%s after flush = %d bytes, want %d", key, len(got), len(value))
+		}
+		single.Close()
+	}
+}
+
 func TestAutoIncrement(t *testing.T) {
 	var db = testDatabase(t)
 	var key1 = make([]byte, 8)

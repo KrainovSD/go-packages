@@ -253,3 +253,85 @@ rocksdb_options_t *cf_create(cf_opts_t *cfg, rocksdb_cache_t *shared_cache) {
     }
     return opts;
 }
+
+static const char *cf_compression_name(int compression) {
+    switch (compression) {
+    case rocksdb_no_compression:
+        return "kNoCompression";
+    case rocksdb_snappy_compression:
+        return "kSnappyCompression";
+    case rocksdb_zlib_compression:
+        return "kZlibCompression";
+    case rocksdb_bz2_compression:
+        return "kBZip2Compression";
+    case rocksdb_lz4_compression:
+        return "kLZ4Compression";
+    case rocksdb_lz4hc_compression:
+        return "kLZ4HCCompression";
+    case rocksdb_xpress_compression:
+        return "kXpressCompression";
+    case rocksdb_zstd_compression:
+        return "kZSTD";
+    default:
+        return NULL;
+    }
+}
+
+void cf_set_options(rocksdb_t *db, rocksdb_column_family_handle_t *handle,
+                    cf_opts_t *cfg, char **err) {
+    if (err) {
+        *err = NULL;
+    }
+    if (cfg == NULL) {
+        return;
+    }
+    opts_kv_t kv = {0};
+    opts_kv_add_size(&kv, "write_buffer_size", cfg->write_buffer_size);
+    opts_kv_add_int(&kv, "max_write_buffer_number",
+                    cfg->max_write_buffer_number);
+    opts_kv_add_u64(&kv, "target_file_size_base", cfg->target_file_size_base);
+    opts_kv_add_int(&kv, "target_file_size_multiplier",
+                    cfg->target_file_size_multiplier);
+    opts_kv_add_u64(&kv, "max_bytes_for_level_base",
+                    cfg->max_bytes_for_level_base);
+    opts_kv_add_double(&kv, "max_bytes_for_level_multiplier",
+                       cfg->max_bytes_for_level_multiplier);
+    opts_kv_add_int(&kv, "level0_file_num_compaction_trigger",
+                    cfg->level0_file_num_compaction_trigger);
+    opts_kv_add_int(&kv, "level0_slowdown_writes_trigger",
+                    cfg->level0_slowdown_writes_trigger);
+    opts_kv_add_int(&kv, "level0_stop_writes_trigger",
+                    cfg->level0_stop_writes_trigger);
+    if (cfg->compression.has) {
+        const char *name = cf_compression_name(cfg->compression.v);
+        if (name == NULL) {
+            *err = strdup("unknown compression type");
+            return;
+        }
+        opts_kv_add_str(&kv, "compression", name);
+    }
+    if (cfg->compression_levels != NULL && cfg->compression_levels_size > 0) {
+        char value[OPTS_KV_VALUE_MAX];
+        size_t offset = 0;
+        for (size_t i = 0; i < cfg->compression_levels_size; i++) {
+            const char *name = cf_compression_name(cfg->compression_levels[i]);
+            if (name == NULL) {
+                *err = strdup("unknown compression type in compression levels");
+                return;
+            }
+            int written = snprintf(value + offset, sizeof(value) - offset,
+                                   "%s%s", i > 0 ? ":" : "", name);
+            if (written < 0 || (size_t)written >= sizeof(value) - offset) {
+                *err = strdup("compression levels string is too long");
+                return;
+            }
+            offset += (size_t)written;
+        }
+        opts_kv_add_str(&kv, "compression_per_level", value);
+    }
+    opts_kv_add_u64(&kv, "ttl", cfg->ttl);
+    if (kv.count == 0) {
+        return;
+    }
+    rocksdb_set_options_cf(db, handle, kv.count, kv.keys, kv.values, err);
+}

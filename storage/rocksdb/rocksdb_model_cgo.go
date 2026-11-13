@@ -90,6 +90,39 @@ func (o *TableOptions) toC(arena *Arena) *C.cf_table_opts_t {
 	return cOpts
 }
 
+func (o *MutableDBOptions) toC(arena *Arena) *C.db_opts_t {
+	var cOpts = (*C.db_opts_t)(arena.alloc(unsafe.Sizeof(C.db_opts_t{}), unsafe.Alignof(C.db_opts_t{})))
+	*cOpts = C.db_opts_t{
+		max_background_jobs:                 optInt(o.MaxBackgroundJobs),
+		max_total_wal_size:                  optU64(o.MaxTotalWalSize),
+		stats_dump_period_sec:               optUnsigned(o.StatsDumpPeriodSec),
+		delete_obsolete_files_period_micros: optU64(o.DeleteObsoleteFilesPeriodMicros),
+		max_open_files:                      optInt(o.MaxOpenFiles),
+	}
+	return cOpts
+}
+
+func (o *MutableCFOptions) toC(arena *Arena) *C.cf_opts_t {
+	var cLevels, cLevelsSize = compressionLevelsToC(arena, o.CompressionLevels)
+	var cOpts = (*C.cf_opts_t)(arena.alloc(unsafe.Sizeof(C.cf_opts_t{}), unsafe.Alignof(C.cf_opts_t{})))
+	*cOpts = C.cf_opts_t{
+		write_buffer_size:                   optSize(o.WriteBufferSize),
+		max_write_buffer_number:             optInt(o.MaxWriteBufferNumber),
+		target_file_size_base:               optU64(o.TargetFileSizeBase),
+		target_file_size_multiplier:         optInt(o.TargetFileSizeMultiplier),
+		max_bytes_for_level_base:            optU64(o.MaxBytesForLevelBase),
+		max_bytes_for_level_multiplier:      optDouble(o.MaxBytesForLevelMultiplier),
+		level0_file_num_compaction_trigger:  optInt(o.Level0FileNumCompactionTrigger),
+		level0_slowdown_writes_trigger:      optInt(o.Level0SlowdownWritesTrigger),
+		level0_stop_writes_trigger:          optInt(o.Level0StopWritesTrigger),
+		compression:                         optInt(o.Compression),
+		compression_levels:                  cLevels,
+		compression_levels_size:             cLevelsSize,
+		ttl:                                 optU64(o.TTL),
+	}
+	return cOpts
+}
+
 func (o *WriterOptions) toC(arena *Arena) *C.db_write_opts_t {
 	var cOpts = (*C.db_write_opts_t)(arena.alloc(unsafe.Sizeof(C.db_write_opts_t{}), unsafe.Alignof(C.db_write_opts_t{})))
 	*cOpts = C.db_write_opts_t{

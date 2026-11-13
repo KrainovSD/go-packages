@@ -375,6 +375,32 @@ func (db *DB) DropAndRecreateCF(cf uint8) error {
 	return nil
 }
 
+func (db *DB) SetOptions(opts MutableDBOptions) error {
+	var arena = <-db.arenaChan
+	var cErr CError
+	C.db_set_options(db.db, opts.toC(arena), &cErr.p)
+	var err = cErr.Error()
+	arena.reset()
+	db.arenaChan <- arena
+	if err != nil {
+		return fmt.Errorf("set options: %w", err)
+	}
+	return nil
+}
+
+func (db *DB) SetCFOptions(cf uint8, opts MutableCFOptions) error {
+	var arena = <-db.arenaChan
+	var cErr CError
+	C.db_cf_set_options(db.db, C.uint8_t(cf), opts.toC(arena), &cErr.p)
+	var err = cErr.Error()
+	arena.reset()
+	db.arenaChan <- arena
+	if err != nil {
+		return fmt.Errorf("set cf %d options: %w", cf, err)
+	}
+	return nil
+}
+
 func (db *DB) Stats() (*Stats, error) {
 	var cDB C.db_stats_t
 	var cErr CError

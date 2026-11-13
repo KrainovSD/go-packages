@@ -49,21 +49,8 @@ type RocksDBOptions struct {
 	Writers        []WriterOptions
 	Readers        []ReaderOptions
 
-	CompactionType                  *CompactionType
-	MemtableMemoryBudget            *uint64
-	MaxBackgroundJobs               *int
-	MaxTotalWalSize                 *uint64
-	WriteBufferSize                 *uint64
-	AvoidUnnecessaryBlockingIO      *bool
-	KeepLogFileNum                  *uint64
-	MaxLogFileSize                  *uint64
-	StatsDumpPeriodSec              *uint32
-	DeleteObsoleteFilesPeriodMicros *uint64
-	Compression                     *Compression
-	CompressionLevels               []Compression
-	MaxOpenFiles                    *int
-	BlockCacheSize                  *uint64
-	StatisticsLevel                 *StatisticsLevel
+	MutableDBOptions
+	ImmutableDBOptions
 }
 
 type ColumnFamilyOptions struct {
@@ -73,24 +60,53 @@ type ColumnFamilyOptions struct {
 	ComparatorType ComparatorType
 	MergeOperator  unsafe.Pointer
 
+	MutableCFOptions
+	ImmutableCFOptions
+}
+
+type MutableDBOptions struct {
+	MaxBackgroundJobs               *int
+	MaxTotalWalSize                 *uint64
+	StatsDumpPeriodSec              *uint32
+	DeleteObsoleteFilesPeriodMicros *uint64
+	MaxOpenFiles                    *int
+}
+
+type ImmutableDBOptions struct {
+	CompactionType             *CompactionType
+	MemtableMemoryBudget       *uint64
+	WriteBufferSize            *uint64
+	AvoidUnnecessaryBlockingIO *bool
+	KeepLogFileNum             *uint64
+	MaxLogFileSize             *uint64
+	Compression                *Compression
+	CompressionLevels          []Compression
+	BlockCacheSize             *uint64
+	StatisticsLevel            *StatisticsLevel
+}
+
+type MutableCFOptions struct {
+	WriteBufferSize                *uint64
+	MaxWriteBufferNumber           *int
+	TargetFileSizeBase             *uint64
+	TargetFileSizeMultiplier       *int
+	MaxBytesForLevelBase           *uint64
+	MaxBytesForLevelMultiplier     *float64
+	Level0FileNumCompactionTrigger *int
+	Level0SlowdownWritesTrigger    *int
+	Level0StopWritesTrigger        *int
+	Compression                    *Compression
+	CompressionLevels              []Compression
+	TTL                            *uint64
+}
+
+type ImmutableCFOptions struct {
 	CompactionType                   *CompactionType
 	MemtableMemoryBudget             *uint64
 	MaxBackgroundJobs                *int
-	WriteBufferSize                  *uint64
 	MinWriteBufferNumberToMerge      *int
-	MaxWriteBufferNumber             *int
-	TargetFileSizeBase               *uint64
-	TargetFileSizeMultiplier         *int
-	MaxBytesForLevelBase             *uint64
-	MaxBytesForLevelMultiplier       *float64
 	LevelCompactionDynamicLevelBytes *bool
-	Level0FileNumCompactionTrigger   *int
-	Level0SlowdownWritesTrigger      *int
-	Level0StopWritesTrigger          *int
-	Compression                      *Compression
-	CompressionLevels                []Compression
 	MaxOpenFiles                     *int
-	TTL                              *uint64
 
 	Table *TableOptions
 }
